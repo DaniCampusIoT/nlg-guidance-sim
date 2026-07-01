@@ -5,27 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nlg-guidance-sim"
 version = "0.1.0"
-description = "Simulación Python del guiado y captura del tren delantero (NLG) sobre plataforma guiada por raíles"
+description = "Simulador interactivo 2D para guiado y captura de tren delantero"
 readme = "README.md"
-requires-python = ">=3.11"
-authors = [
-  { name = "Quandum Aerospace" }
-]
+requires-python = ">=3.10"
 dependencies = [
-  "numpy",
-  "scipy",
-  "matplotlib",
-  "pyyaml",
-  "pydantic",
-]
-
-[project.optional-dependencies]
-dev = [
-  "pytest",
-  "jupyter",
-  "ipykernel",
-  "ruff",
-  "black",
+    "streamlit>=1.36",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
 ]
 
 [tool.setuptools]
@@ -33,15 +19,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]

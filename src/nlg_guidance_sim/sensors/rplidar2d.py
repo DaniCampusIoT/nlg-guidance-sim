@@ -1,7 +1,122 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+import math
+
+import numpy as np
+
+from nlg_guidance_sim.world.scene import Scene
+
+
+def cross2d(a: np.ndarray, b: np.ndarray) -> float:
+    return float(a[0] * b[1] - a[1] * b[0])
 
 
 @dataclass
-class RPLidar2D:
-    rate_hz: float = 10.0
-    range_max_m: float = 30.0
+class ScanResult:
+    origin_xy: np.ndarray
+    angles_rad: np.ndarray
+    ranges_m: np.ndarray
+    points_xy: np.ndarray
+    hit_mask: np.ndarray
+
+    def ordered_hit_points(self) -> np.ndarray:
+        return self.points_xy[self.hit_mask]
+
+
+@dataclass
+class RPLidar2DSim:
+    origin_x_m: float = 1.28
+    origin_y_m: float = 0.0
+    angle_min_deg: float = -60.0
+    angle_max_deg: float = 60.0
+    num_beams: int = 360
+    max_range_m: float = 5.0
+    range_noise_std_m: float = 0.002
+    seed: int = 7
+
+    def origin(self) -> np.ndarray:
+        return np.array([self.origin_x_m, self.origin_y_m], dtype=float)
+
+    def beam_angles_rad(self) -> np.ndarray:
+        return np.deg2rad(
+            np.linspace(self.angle_min_deg, self.angle_max_deg, self.num_beams)
+        )
+
+    def _polygon_segments(self, polygon: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+        segs: list[tuple[np.ndarray, np.ndarray]] = []
+        for i in range(len(polygon)):
+            p1 = polygon[i]
+            p2 = polygon[(i + 1) % len(polygon)]
+            segs.append((p1, p2))
+        return segs
+
+    def _all_segments(self, scene: Scene) -> list[tuple[np.ndarray, np.ndarray]]:
+        segments: list[tuple[np.ndarray, np.ndarray]] = []
+        for poly in scene.scan_obstacle_polygons():
+            segments.extend(self._polygon_segments(poly))
+        return segments
+
+    def _ray_segment_intersection(
+        self,
+        ray_origin: np.ndarray,
+        ray_dir: np.ndarray,
+        p1: np.ndarray,
+        p2: np.ndarray,
+    ) -> tuple[bool, float, np.ndarray]:
+        seg = p2 - p1
+        denom = cross2d(ray_dir, seg)
+        if abs(denom) < 1e-9:
+            return False, np.inf, np.array([np.nan, np.nan])
+
+        diff = p1 - ray_origin
+        t = cross2d(diff, seg) / denom
+        u = cross2d(diff, ray_dir) / denom
+
+        if t >= 0.0 and 0.0 <= u <= 1.0:
+            point = ray_origin + t * ray_dir
+            return True, float(t), point
+
+        return False, np.inf, np.array([np.nan, np.nan])
+
+    def scan(self, scene: Scene) -> ScanResult:
+        rng = np.random.default_rng(self.seed)
+        origin = self.origin()
+        angles = self.beam_angles_rad()
+        segments = self._all_segments(scene)
+
+        ranges = np.full_like(angles, fill_value=self.max_range_m, dtype=float)
+        points = np.zeros((len(angles), 2), dtype=float)
+        hit_mask = np.zeros(len(angles), dtype=bool)
+
+        for i, angle in enumerate(angles):
+            direction = np.array([math.cos(angle), math.sin(angle)], dtype=float)
+            best_dist = self.max_range_m
+            best_point = origin + best_dist * direction
+            hit = False
+
+            for p1, p2 in segments:
+                ok, dist, point = self._ray_segment_intersection(origin, direction, p1, p2)
+                if ok and dist < best_dist:
+                    best_dist = dist
+                    best_point = point
+                    hit = True
+
+            if hit:
+                noisy = best_dist + rng.normal(0.0, self.range_noise_std_m)
+                noisy = float(np.clip(noisy, 0.0, self.max_range_m))
+                best_point = origin + noisy * direction
+                ranges[i] = noisy
+                points[i] = best_point
+                hit_mask[i] = True
+            else:
+                ranges[i] = self.max_range_m
+                points[i] = best_point
+
+        return ScanResult(
+            origin_xy=origin,
+            angles_rad=angles,
+            ranges_m=ranges,
+            points_xy=points,
+            hit_mask=hit_mask,
+        )

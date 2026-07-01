@@ -1,9 +1,25 @@
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from nlg_guidance_sim.catalog.presets import PRESETS
+from nlg_guidance_sim.geometry.nlg_model import NLGModel
 from nlg_guidance_sim.world.scene import Scene
-from nlg_guidance_sim.estimation.y_psi_solver import solve_y_psi
 
 
-def test_smoke_pipeline() -> None:
+def test_presets_exist():
+    assert len(PRESETS) >= 3
+
+
+def test_single_wheel_model():
+    model = NLGModel(arrangement="single")
+    assert model.wheel_count() == 1
+
+
+def test_scene_capture_position():
     scene = Scene()
-    result = solve_y_psi(scene)
-    assert scene.name == "nominal_scene"
-    assert result.confidence == 0.0
+    assert scene.capture_x_m > scene.platform_front_x_m

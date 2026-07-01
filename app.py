@@ -56,12 +56,12 @@ def inject_css() -> None:
 
 def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
     st.sidebar.title("NLG Guidance Sim")
-    st.sidebar.caption("Escena geométrica + LiDAR 2D sintético")
+    st.sidebar.caption("Escena geom\u00e9trica + LiDAR 2D sint\u00e9tico")
 
     preset_name = st.sidebar.selectbox("Preset de aeronave", list(PRESETS.keys()))
     preset = PRESETS[preset_name]
 
-    st.sidebar.subheader("Configuración del NLG")
+    st.sidebar.subheader("Configuraci\u00f3n del NLG")
     arrangement = st.sidebar.radio(
         "Ruedas del tren delantero",
         options=["single", "dual"],
@@ -70,14 +70,14 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
     )
 
     tire_length_m = st.sidebar.slider(
-        "Longitud aparente del neumático [m]",
+        "Longitud aparente del neum\u00e1tico [m]",
         min_value=0.40,
         max_value=1.10,
         value=float(preset.tire_length_m),
         step=0.01,
     )
     tire_width_m = st.sidebar.slider(
-        "Anchura aparente del neumático [m]",
+        "Anchura aparente del neum\u00e1tico [m]",
         min_value=0.10,
         max_value=0.40,
         value=float(preset.tire_width_m),
@@ -91,7 +91,7 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
         step=0.1,
     )
     track_width_m = st.sidebar.slider(
-        "Separación entre ruedas [m]",
+        "Separaci\u00f3n entre ruedas [m]",
         min_value=0.00,
         max_value=0.90,
         value=float(0.0 if arrangement == "single" else preset.track_width_m),
@@ -101,7 +101,7 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
 
     st.sidebar.subheader("Plataforma")
     rail_gauge_m = st.sidebar.slider(
-        "Separación entre raíles [m]",
+        "Separaci\u00f3n entre ra\u00edles [m]",
         min_value=0.80,
         max_value=2.00,
         value=float(preset.rail_gauge_m),
@@ -138,7 +138,7 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
 
     st.sidebar.subheader("Pose del tren")
     center_x_m = st.sidebar.slider(
-        "Posición longitudinal X [m]",
+        "Posici\u00f3n longitudinal X [m]",
         min_value=0.60,
         max_value=6.00,
         value=float(preset.center_x_m),
@@ -152,7 +152,7 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
         step=0.01,
     )
     psi_deg = st.sidebar.slider(
-        "Oblicuidad ψ [deg]",
+        "Oblicuidad \u03c8 [deg]",
         min_value=-20.0,
         max_value=20.0,
         value=float(preset.psi_deg),
@@ -208,28 +208,28 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
         step=0.01,
     )
     angle_min_deg = st.sidebar.slider(
-        "FoV mínimo [deg]",
+        "FoV m\u00ednimo [deg]",
         min_value=-140,
         max_value=0,
         value=-60,
         step=1,
     )
     angle_max_deg = st.sidebar.slider(
-        "FoV máximo [deg]",
+        "FoV m\u00e1ximo [deg]",
         min_value=0,
         max_value=140,
         value=60,
         step=1,
     )
     num_beams = st.sidebar.slider(
-        "Número de haces",
+        "N\u00famero de haces",
         min_value=60,
         max_value=1440,
         value=360,
         step=30,
     )
     max_range_m = st.sidebar.slider(
-        "Alcance máximo [m]",
+        "Alcance m\u00e1ximo [m]",
         min_value=0.50,
         max_value=10.00,
         value=5.00,
@@ -258,7 +258,7 @@ def build_scene_and_sensor() -> tuple[Scene, RPLidar2DSim | None]:
 def main() -> None:
     st.set_page_config(
         page_title="NLG Guidance Sim",
-        page_icon="🛞",
+        page_icon="\U0001f6de",
         layout="wide",
         initial_sidebar_state="expanded",
     )
@@ -266,15 +266,15 @@ def main() -> None:
 
     st.title("Simulador interactivo del tren delantero")
     st.caption(
-        "Geometría paramétrica del NLG, plataforma guiada por raíles y LiDAR 2D sintético "
-        "preparado para futuras etapas de fitting y cálculo de Y / ψ."
+        "Geometr\u00eda param\u00e9trica del NLG, plataforma guiada por ra\u00edles y LiDAR 2D sint\u00e9tico "
+        "preparado para futuras etapas de fitting y c\u00e1lculo de Y / \u03c8."
     )
 
     scene, lidar = build_scene_and_sensor()
     scan = lidar.scan(scene) if lidar is not None else None
 
     tab_scene, tab_lidar, tab_diag = st.tabs(
-        ["Escena", "LiDAR 2D", "Diagnóstico"]
+        ["Escena", "LiDAR 2D", "Diagn\u00f3stico"]
     )
 
     with tab_scene:
@@ -302,7 +302,7 @@ def main() -> None:
             st.markdown("</div>", unsafe_allow_html=True)
         with c3:
             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-            st.metric("Oblicuidad ψ", f"{summary['psi_deg']:.2f} deg")
+            st.metric("Oblicuidad \u03c8", f"{summary['psi_deg']:.2f} deg")
             st.markdown("</div>", unsafe_allow_html=True)
         with c4:
             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
@@ -320,16 +320,16 @@ def main() -> None:
             st.subheader("Notas")
             st.markdown(
                 """
-                - El modelo de rueda es paramétrico y no circular.
+                - El modelo de rueda es param\u00e9trico y no circular.
                 - La plataforma se puede ensanchar o estrechar.
                 - Se puede simular una o dos ruedas.
-                - El LiDAR devuelve puntos ordenados por ángulo.
-                - La base está lista para añadir fitting de Y y ψ.
+                - El LiDAR devuelve puntos ordenados por \u00e1ngulo.
+                - La base est\u00e1 lista para a\u00f1adir fitting de Y y \u03c8.
                 """
             )
             st.markdown(
-                '<p class="small-note">Siguiente paso sugerido: extraer clusters válidos y ajustar '
-                'contornos o primitivas geométricas sobre la nube 2D ordenada.</p>',
+                '<p class="small-note">Siguiente paso sugerido: extraer clusters v\u00e1lidos y ajustar '
+                'contornos o primitivas geom\u00e9tricas sobre la nube 2D ordenada.</p>',
                 unsafe_allow_html=True,
             )
 
