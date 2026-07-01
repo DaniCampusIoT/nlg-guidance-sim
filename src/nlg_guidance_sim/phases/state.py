@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import ClassVar
 
 
 class PhaseState(Enum):
@@ -70,6 +70,41 @@ class ApproachPhase:
     thresholds: PhaseThresholds = field(default_factory=PhaseThresholds)
     _state: PhaseState = field(default=PhaseState.APPROACH, init=False, repr=False)
     _history: list[PhaseState] = field(default_factory=list, init=False, repr=False)
+
+    # ---------- class-level display tables (ClassVar — NOT dataclass fields) ----------
+
+    PHASE_LABELS: ClassVar[dict[PhaseState, str]] = {
+        PhaseState.APPROACH: "Fase 1 · APPROACH",
+        PhaseState.ALIGN:    "Fase 2 · ALIGN",
+        PhaseState.CAPTURE:  "Fase 3 · CAPTURE",
+        PhaseState.HOLD:     "✅ HOLD",
+    }
+
+    PHASE_COLORS: ClassVar[dict[PhaseState, str]] = {
+        PhaseState.APPROACH: "#c57b2b",   # orange — caution
+        PhaseState.ALIGN:    "#3b6ea8",   # blue — active guidance
+        PhaseState.CAPTURE:  "#437a22",   # green — imminent
+        PhaseState.HOLD:     "#01696f",   # teal — complete
+    }
+
+    PHASE_DESCRIPTIONS: ClassVar[dict[PhaseState, str]] = {
+        PhaseState.APPROACH: (
+            "El NLG se aproxima. Sólo guiado grueso activo. "
+            "Espera a que X, Y y ψ entren en ventana de alineación."
+        ),
+        PhaseState.ALIGN: (
+            "Zona de alineación. Corrección lateral y angular fina activa. "
+            "Avanza cuando X < umbral de captura y errores dentro de margen."
+        ),
+        PhaseState.CAPTURE: (
+            "Embocadura alcanzada. Contacto con rampa inminente. "
+            "Sensores cortos de validación fina en acción."
+        ),
+        PhaseState.HOLD: (
+            "NLG asentado en plataforma. Guiado completo. "
+            "Companion ECU activa freno + bloqueo de raíl."
+        ),
+    }
 
     # ---------- public interface ----------
 
@@ -143,39 +178,6 @@ class ApproachPhase:
         return self._state
 
     # ---------- display helpers ----------
-
-    PHASE_LABELS: dict[PhaseState, str] = {
-        PhaseState.APPROACH: "Fase 1 · APPROACH",
-        PhaseState.ALIGN:    "Fase 2 · ALIGN",
-        PhaseState.CAPTURE:  "Fase 3 · CAPTURE",
-        PhaseState.HOLD:     "✅ HOLD",
-    }
-
-    PHASE_COLORS: dict[PhaseState, str] = {
-        PhaseState.APPROACH: "#c57b2b",   # orange — caution
-        PhaseState.ALIGN:    "#3b6ea8",   # blue — active guidance
-        PhaseState.CAPTURE:  "#437a22",   # green — imminente
-        PhaseState.HOLD:     "#01696f",   # teal — complete
-    }
-
-    PHASE_DESCRIPTIONS: dict[PhaseState, str] = {
-        PhaseState.APPROACH: (
-            "El NLG se aproxima. Sólo guiado grueso activo. "
-            "Espera a que X, Y y ψ entren en ventana de alineación."
-        ),
-        PhaseState.ALIGN: (
-            "Zona de alineación. Corrección lateral y angular fina activa. "
-            "Avanza cuando X < umbral de captura y errores dentro de margen."
-        ),
-        PhaseState.CAPTURE: (
-            "Embocadura alcanzada. Contacto con rampa inminente. "
-            "Sensores cortos de validación fina en acción."
-        ),
-        PhaseState.HOLD: (
-            "NLG asentado en plataforma. Guiado completo. "
-            "Companion ECU activa freno + bloqueo de raíl."
-        ),
-    }
 
     def label(self) -> str:
         return self.PHASE_LABELS[self._state]
