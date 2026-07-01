@@ -1,0 +1,10 @@
+numpy
+scipy
+matplotlib
+pyyaml
+pydantic
+pytest
+jupyter
+ipykernel
+ruff
+black

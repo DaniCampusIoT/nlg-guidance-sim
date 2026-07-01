@@ -1,0 +1,10 @@
+project:
+  name: nlg-guidance-sim
+  frame_world: world
+  frame_platform: platform
+  frame_nlg: nlg
+
+simulation:
+  dt: 0.05
+  duration_s: 10.0
+  seed: 42
