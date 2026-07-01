@@ -1,3 +1,3 @@
-from .plotting import plot_scene, plot_ranges
+from .plotting import plot_scene, plot_ranges, plot_estimation
 
-__all__ = ["plot_scene", "plot_ranges"]
+__all__ = ["plot_scene", "plot_ranges", "plot_estimation"]

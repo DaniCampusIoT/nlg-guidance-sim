@@ -1,4 +1,3 @@
-from .lshape import LShapeFitter, LShapeResult
-from .pose import estimate_pose, PoseEstimate
+from .lshape import LShapeFitResult, fit_lshape, estimate_pose
 
-__all__ = ["LShapeFitter", "LShapeResult", "estimate_pose", "PoseEstimate"]
+__all__ = ["LShapeFitResult", "fit_lshape", "estimate_pose"]

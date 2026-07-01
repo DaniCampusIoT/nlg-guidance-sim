@@ -2,14 +2,14 @@
 
 Simulador interactivo 2D para estudiar la aproximación del nose landing gear (NLG)
 hacia una plataforma guiada por raíles, con geometría paramétrica, LiDAR 2D sintético,
-estimación de Y/ψ por fitting L-shape y máquina de fases de aproximación.
+estimación de Y/ψ por L-shape fitting y máquina de estados de fases de aproximación.
 
 ## Instalación
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate     # Linux/macOS
-# .venv\Scripts\activate       # Windows
+# Windows:  .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
 
 pip install -r requirements.txt
 pip install -e .
@@ -21,64 +21,41 @@ pip install -e .
 streamlit run app.py
 ```
 
-## Qué incluye (v0.2)
-
-| Módulo | Funcionalidad |
-|---|---|
-| `catalog/presets.py` | Presets de aeronave — cargados desde YAML o built-in |
-| `geometry/` | Perfil 2D de neumático (superelipse) + modelo single/dual wheel |
-| `world/scene.py` | Plataforma, cuna, raíles |
-| `sensors/rplidar2d.py` | LiDAR 2D sintético por ray casting con ruido gaussiano |
-| `estimation/lshape.py` | Fitting L-shape TLS sobre nube 2D ordenada (CISRAM 2015) |
-| `estimation/pose.py` | Estimación de Y y ψ a partir del resultado L-shape |
-| `control/phases.py` | Máquina de fases Fase 1/2/3 con umbrales configurables |
-| `viz/plotting.py` | Escena, rangos LiDAR, debug de estimación |
-
-## Estructura de directorios
+## Estructura de capas
 
 ```
 nlg-guidance-sim/
-├─ app.py
-├─ requirements.txt
-├─ pyproject.toml
-├─ configs/
-│  └─ aircraft_presets.yaml      ← edita aquí para nuevas aeronaves
-├─ .streamlit/config.toml
-└─ src/nlg_guidance_sim/
-   ├─ catalog/
-   ├─ geometry/
-   ├─ world/
-   ├─ sensors/
-   ├─ estimation/     ← lshape.py + pose.py
-   ├─ control/        ← phases.py (FSM)
-   └─ viz/
+├── app.py                          ← Streamlit UI (6 tabs)
+├── configs/presets.yaml            ← Editor YAML de presets
+└── src/nlg_guidance_sim/
+    ├── catalog/
+    │   ├── presets.py              ← Presets Python (built-in)
+    │   └── yaml_loader.py          ← Carga/valida/serializa YAML
+    ├── geometry/
+    │   ├── profiles.py             ← Superelipse paramétrica
+    │   └── nlg_model.py            ← Modelo single/dual wheel
+    ├── world/scene.py              ← Plataforma + cuna + raíles
+    ├── sensors/rplidar2d.py        ← Ray casting con ruido gaussiano
+    ├── estimation/
+    │   └── lshape.py               ← L-shape fitting (CISRAM 2015)
+    ├── phases/
+    │   └── state.py                ← FSM Fases 1/2/3/HOLD
+    └── viz/plotting.py             ← Matplotlib + overlay estimación
+tests/
+    ├── test_smoke.py
+    ├── test_estimation.py
+    └── test_phases.py
 ```
 
-## Editor de presets YAML
+## Qué incluye v0.2
 
-Abre el expander **🛠️ Editor de presets** en la barra lateral para:
-- Editar el YAML directamente en la UI
-- Subir un archivo `aircraft_presets.yaml` propio
-- Descargar el YAML actual para compartirlo
-
-Estructura de un preset:
-```yaml
-presets:
-  - name: "Mi aeronave"
-    arrangement: dual          # single | dual
-    tire_length_m: 0.72
-    tire_width_m: 0.23
-    shoulder_exponent: 3.8
-    track_width_m: 0.48
-    rail_gauge_m: 1.25
-    platform_length_m: 1.45
-    platform_width_m: 0.90
-    capture_width_m: 0.65
-    ramp_length_m: 0.32
-    center_x_m: 2.10
-    center_y_m: 0.10
-    psi_deg: 3.5
-```
+- **Estimación Y/ψ** — L-shape fitting sobre nube 2D ordenada (método CISRAM 2015).
+  Fallbacks automáticos a ajuste de recta y centroide.
+- **Editor YAML** — añade presets de aeronave sin tocar código Python.
+  Los presets se cargan en caliente y aparecen en la barra lateral.
+- **Fases de aproximación** — FSM con 4 estados: APPROACH → ALIGN → CAPTURE → HOLD.
+  Transiciones basadas en X, |Y| y |ψ|; regresión automática si el NLG se desvía.
+  Reset manual desde la UI.
 
 ## Tests
 
@@ -86,3 +63,10 @@ presets:
 pip install pytest
 pytest tests/ -v
 ```
+
+## Próximos pasos sugeridos
+
+- Integración con datos reales de RPLidar A1/A2
+- Filtro de Kalman sobre estimaciones Y/ψ
+- Exportación de escenarios a JSON para reproducibilidad
+- Sensores cortos de validación fina (Fase 3)
