@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlg-guidance-sim"
-version = "0.1.0"
+version = "0.2.0"
 description = "Simulador interactivo 2D para guiado y captura de tren delantero"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,8 @@ dependencies = [
     "streamlit>=1.36",
     "numpy>=1.26",
     "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "scipy>=1.12",
 ]
 
 [tool.setuptools]
