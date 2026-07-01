@@ -327,11 +327,6 @@ def main() -> None:
                 - La base est\u00e1 lista para a\u00f1adir fitting de Y y \u03c8.
                 """
             )
-            st.markdown(
-                '<p class="small-note">Siguiente paso sugerido: extraer clusters v\u00e1lidos y ajustar '
-                'contornos o primitivas geom\u00e9tricas sobre la nube 2D ordenada.</p>',
-                unsafe_allow_html=True,
-            )
 
 
 if __name__ == "__main__":
