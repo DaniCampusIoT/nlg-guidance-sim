@@ -26,7 +26,7 @@ from nlg_guidance_sim.viz.plotting import plot_ranges, plot_scene, plot_estimati
 from nlg_guidance_sim.world.scene import Scene
 
 
-# ─── helpers ──────────────────────────────────────────────────────────────────
+# ─── helpers ───────────────────────────────────────────────────────────────────────────────
 
 def inject_css() -> None:
     st.markdown(
@@ -95,13 +95,13 @@ def _phase_banner(phase: ApproachPhase) -> None:
     st.caption(phase.description())
 
 
-# ─── sidebar ──────────────────────────────────────────────────────────────────
+# ─── sidebar ──────────────────────────────────────────────────────────────────────────────
 
 def build_scene_and_sensor(
     extra_presets: dict | None = None,
 ) -> tuple[Scene, RPLidar2DSim | None]:
     st.sidebar.title("NLG Guidance Sim")
-    st.sidebar.caption("Escena geométrica + LiDAR 2D sintético")
+    st.sidebar.caption("Escena geom\u00e9trica + LiDAR 2D sint\u00e9tico")
 
     all_presets = dict(PRESETS)
     if extra_presets:
@@ -110,27 +110,27 @@ def build_scene_and_sensor(
     preset_name = st.sidebar.selectbox("Preset de aeronave", list(all_presets.keys()))
     preset = all_presets[preset_name]
 
-    st.sidebar.subheader("Configuración del NLG")
+    st.sidebar.subheader("Configuraci\u00f3n del NLG")
     arrangement = st.sidebar.radio(
         "Ruedas del tren delantero",
         options=["single", "dual"],
         index=0 if preset.arrangement == "single" else 1,
         format_func=lambda v: "Una rueda" if v == "single" else "Dos ruedas",
     )
-    tire_length_m = st.sidebar.slider("Longitud aparente del neumático [m]", 0.40, 1.10,
+    tire_length_m = st.sidebar.slider("Longitud aparente del neum\u00e1tico [m]", 0.40, 1.10,
                                        float(preset.tire_length_m), 0.01)
-    tire_width_m  = st.sidebar.slider("Anchura aparente del neumático [m]", 0.10, 0.40,
+    tire_width_m  = st.sidebar.slider("Anchura aparente del neum\u00e1tico [m]", 0.10, 0.40,
                                        float(preset.tire_width_m), 0.01)
     shoulder_exponent = st.sidebar.slider("Perfil de hombro", 2.0, 6.0,
                                            float(preset.shoulder_exponent), 0.1)
     track_width_m = st.sidebar.slider(
-        "Separación entre ruedas [m]", 0.00, 0.90,
+        "Separaci\u00f3n entre ruedas [m]", 0.00, 0.90,
         float(0.0 if arrangement == "single" else preset.track_width_m),
         0.01, disabled=arrangement == "single",
     )
 
     st.sidebar.subheader("Plataforma")
-    rail_gauge_m      = st.sidebar.slider("Separación entre raíles [m]",   0.80, 2.00, float(preset.rail_gauge_m),      0.01)
+    rail_gauge_m      = st.sidebar.slider("Separaci\u00f3n entre ra\u00edles [m]",   0.80, 2.00, float(preset.rail_gauge_m),      0.01)
     platform_length_m = st.sidebar.slider("Longitud de plataforma [m]",    0.80, 3.50, float(preset.platform_length_m), 0.01)
     platform_width_m  = st.sidebar.slider("Ancho de plataforma [m]",       0.45, 1.60, float(preset.platform_width_m),  0.01)
     capture_width_m   = st.sidebar.slider(
@@ -140,9 +140,9 @@ def build_scene_and_sensor(
     ramp_length_m = st.sidebar.slider("Longitud de rampa [m]", 0.10, 1.00, float(preset.ramp_length_m), 0.01)
 
     st.sidebar.subheader("Pose del tren")
-    center_x_m = st.sidebar.slider("Posición longitudinal X [m]", 0.60, 6.00, float(preset.center_x_m), 0.01)
+    center_x_m = st.sidebar.slider("Posici\u00f3n longitudinal X [m]", 0.60, 6.00, float(preset.center_x_m), 0.01)
     center_y_m = st.sidebar.slider("Error lateral Y [m]",         -0.60, 0.60, float(preset.center_y_m), 0.01)
-    psi_deg    = st.sidebar.slider("Oblicuidad ψ [deg]",          -20.0, 20.0, float(preset.psi_deg),    0.1)
+    psi_deg    = st.sidebar.slider("Oblicuidad \u03c8 [deg]",          -20.0, 20.0, float(preset.psi_deg),    0.1)
 
     tire_profile = Tire2DProfile(
         tire_length_m=tire_length_m,
@@ -179,10 +179,10 @@ def build_scene_and_sensor(
     origin_x_m    = st.sidebar.slider("LiDAR X [m]", -0.10, float(scene.capture_x_m + 0.20),
                                        float(scene.capture_x_m - 0.12), 0.01)
     origin_y_m    = st.sidebar.slider("LiDAR Y [m]", -0.50, 0.50, 0.00, 0.01)
-    angle_min_deg = st.sidebar.slider("FoV mínimo [deg]", -140, 0, -60, 1)
-    angle_max_deg = st.sidebar.slider("FoV máximo [deg]", 0, 140, 60, 1)
-    num_beams     = st.sidebar.slider("Número de haces", 60, 1440, 360, 30)
-    max_range_m   = st.sidebar.slider("Alcance máximo [m]", 0.50, 10.00, 5.00, 0.10)
+    angle_min_deg = st.sidebar.slider("FoV m\u00ednimo [deg]", -140, 0, -60, 1)
+    angle_max_deg = st.sidebar.slider("FoV m\u00e1ximo [deg]", 0, 140, 60, 1)
+    num_beams     = st.sidebar.slider("N\u00famero de haces", 60, 1440, 360, 30)
+    max_range_m   = st.sidebar.slider("Alcance m\u00e1ximo [m]", 0.50, 10.00, 5.00, 0.10)
     noise_std_m   = st.sidebar.slider("Ruido gaussiano [m]", 0.0, 0.02, 0.002, 0.001)
 
     lidar = RPLidar2DSim(
@@ -194,12 +194,12 @@ def build_scene_and_sensor(
     return scene, lidar
 
 
-# ─── main ─────────────────────────────────────────────────────────────────────
+# ─── main ────────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     st.set_page_config(
         page_title="NLG Guidance Sim",
-        page_icon="🛞",
+        page_icon="\U0001f6de",
         layout="wide",
         initial_sidebar_state="expanded",
     )
@@ -220,8 +220,8 @@ def main() -> None:
 
     st.title("Simulador interactivo del tren delantero")
     st.caption(
-        "Geometría paramétrica · LiDAR 2D sintético · Estimación Y/ψ · "
-        "Fases de aproximación · Editor de presets YAML"
+        "Geometr\u00eda param\u00e9trica \u00b7 LiDAR 2D sint\u00e9tico \u00b7 Estimaci\u00f3n Y/\u03c8 \u00b7 "
+        "Fases de aproximaci\u00f3n \u00b7 Editor de presets YAML"
     )
 
     scene, lidar = build_scene_and_sensor(
@@ -230,7 +230,7 @@ def main() -> None:
     scan = lidar.scan(scene) if lidar is not None else None
     hit_pts = scan.ordered_hit_points() if scan is not None else None
 
-    # ── Estimación ──
+    # ── Estimaci\u00f3n ──
     est = None
     if hit_pts is not None and len(hit_pts) >= 4:
         est = fit_lshape(hit_pts)
@@ -244,7 +244,7 @@ def main() -> None:
 
     # ── Tabs ──
     tab_scene, tab_lidar, tab_est, tab_phases, tab_yaml, tab_diag = st.tabs(
-        ["Escena", "LiDAR 2D", "Estimación Y/ψ", "Fases", "Editor YAML", "Diagnóstico"]
+        ["Escena", "LiDAR 2D", "Estimaci\u00f3n Y/\u03c8", "Fases", "Editor YAML", "Diagn\u00f3stico"]
     )
 
     # ── Tab: Escena ──
@@ -260,7 +260,7 @@ def main() -> None:
             fig = plot_ranges(scan)
             st.pyplot(fig, use_container_width=True)
 
-    # ── Tab: Estimación ──
+    # ── Tab: Estimaci\u00f3n ──
     with tab_est:
         if est is None:
             st.warning("No hay suficientes puntos de impacto para estimar. Activa el LiDAR y acerca el tren.")
@@ -273,7 +273,7 @@ def main() -> None:
                 st.markdown("</div>", unsafe_allow_html=True)
             with c2:
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.metric("ψ estimada", f"{est.psi_deg:+.3f} deg",
+                st.metric("\u03c8 estimada", f"{est.psi_deg:+.3f} deg",
                           delta=f"ref {math.degrees(scene.nlg.psi_rad):+.3f} deg")
                 st.markdown("</div>", unsafe_allow_html=True)
             with c3:
@@ -290,21 +290,21 @@ def main() -> None:
             fig_est = plot_estimation(scene, est)
             st.pyplot(fig_est, use_container_width=True)
 
-            with st.expander("ℹ️ Método L-shape (CISRAM 2015)"):
+            with st.expander("\u2139\ufe0f M\u00e9todo L-shape (CISRAM 2015)"):
                 st.markdown(
                     """
-                    El estimador barre **N_THETA = 180** orientaciones candidatas en [0, π)
-                    y para cada θ divide la proyección ordenada de los puntos de impacto en
-                    dos brazos. El criterio de coste es la suma de residuos cuadráticos
-                    perpendiculares a las dos rectas ajustadas (método de Zhang et al. 2015).
+                    El estimador barre **N_THETA = 180** orientaciones candidatas en [0, \u03c0)
+                    y para cada \u03b8 divide la proyecci\u00f3n ordenada de los puntos de impacto en
+                    dos brazos. El criterio de coste es la suma de residuos cuadr\u00e1ticos
+                    perpendiculares a las dos rectas ajustadas (m\u00e9todo de Zhang et al. 2015).
 
-                    El ángulo óptimo define la orientación del NLG; la intersección de las
+                    El \u00e1ngulo \u00f3ptimo define la orientaci\u00f3n del NLG; la intersecci\u00f3n de las
                     dos rectas da la esquina del L, cuya coordenada Y es el estimador de
-                    offset lateral. ψ se extrae del brazo más perpendicular al eje X.
+                    offset lateral. \u03c8 se extrae del brazo m\u00e1s perpendicular al eje X.
 
                     **Fallbacks:**
-                    - `line` — menos de dos segmentos válidos: ajuste de recta única.
-                    - `centroid` — menos de 8 puntos: centroide de los puntos de impacto.
+                    - `line` \u2014 menos de dos segmentos v\u00e1lidos: ajuste de recta \u00fanica.
+                    - `centroid` \u2014 menos de 8 puntos: centroide de los puntos de impacto.
                     """
                 )
 
@@ -315,23 +315,22 @@ def main() -> None:
 
         col_l, col_r = st.columns([1, 1])
         with col_l:
-            st.subheader("Parámetros de transición actuales")
-            summary = scene.summary_dict()
+            st.subheader("Par\u00e1metros de transici\u00f3n actuales")
             x_to_capture_ui = max(0.0, scene.capture_x_m - scene.nlg.center_x_m)
             abs_Y   = abs(Y_est)
             abs_psi = abs(math.degrees(psi_est))
 
             t = fsm.thresholds
             rows = [
-                ("X → captura", f"{x_to_capture_ui:.3f} m",
-                 f"umbral ALIGN={t.x_align_m:.2f} m · CAPTURE={t.x_capture_m:.2f} m"),
+                ("X \u2192 captura", f"{x_to_capture_ui:.3f} m",
+                 f"umbral ALIGN={t.x_align_m:.2f} m \u00b7 CAPTURE={t.x_capture_m:.2f} m"),
                 ("|Y| estimada", f"{abs_Y:.4f} m",
-                 f"umbral ALIGN={t.y_align_m:.2f} m · CAPTURE={t.y_capture_m:.2f} m"),
-                ("|ψ| estimada", f"{abs_psi:.3f} deg",
-                 f"umbral ALIGN={math.degrees(t.psi_align_rad):.1f}° · CAPTURE={math.degrees(t.psi_capture_rad):.1f}°"),
+                 f"umbral ALIGN={t.y_align_m:.2f} m \u00b7 CAPTURE={t.y_capture_m:.2f} m"),
+                ("|\u03c8| estimada", f"{abs_psi:.3f} deg",
+                 f"umbral ALIGN={math.degrees(t.psi_align_rad):.1f}\u00b0 \u00b7 CAPTURE={math.degrees(t.psi_capture_rad):.1f}\u00b0"),
             ]
             for label, value, note in rows:
-                st.markdown(f"**{label}**: `{value}` — *{note}*")
+                st.markdown(f"**{label}**: `{value}` \u2014 *{note}*")
 
         with col_r:
             st.subheader("Diagrama de fases")
@@ -343,7 +342,7 @@ def main() -> None:
                 bg     = f"{fsm.PHASE_COLORS[ph]}18" if active else "#fafaf8"
                 label  = fsm.PHASE_LABELS[ph]
                 desc   = fsm.PHASE_DESCRIPTIONS[ph]
-                badge  = " ◀ ACTIVA" if active else ""
+                badge  = " \u25c4 ACTIVA" if active else ""
                 st.markdown(
                     f'<div style="border:{border};background:{bg};border-radius:12px;'
                     f'padding:0.7rem 1rem;margin-bottom:0.5rem">'
@@ -353,7 +352,7 @@ def main() -> None:
                 )
 
         st.markdown("")
-        if st.button("🔄 Reiniciar FSM", type="secondary"):
+        if st.button("\U0001f504 Reiniciar FSM", type="secondary"):
             fsm.reset()
             st.rerun()
 
@@ -361,7 +360,7 @@ def main() -> None:
     with tab_yaml:
         st.subheader("Editor de presets YAML")
         st.caption(
-            "Edita el YAML directamente para añadir nuevos tipos de aeronave sin tocar código Python. "
+            "Edita el YAML directamente para a\u00f1adir nuevos tipos de aeronave sin tocar c\u00f3digo Python. "
             "Los presets cargados se fusionan con los incorporados y aparecen en el selector de la barra lateral."
         )
 
@@ -369,7 +368,7 @@ def main() -> None:
         with col_help:
             st.markdown(
                 """
-                **Estructura mínima**
+                **Estructura m\u00ednima**
                 ```yaml
                 presets:
                   "Mi aeronave":
@@ -400,7 +399,7 @@ def main() -> None:
 
         btn_col1, btn_col2 = st.columns([1, 4])
         with btn_col1:
-            if st.button("✅ Aplicar presets", type="primary"):
+            if st.button("\u2705 Aplicar presets", type="primary"):
                 try:
                     new_presets = load_yaml_str(edited)
                     st.session_state["yaml_text"] = edited
@@ -412,7 +411,7 @@ def main() -> None:
                     st.session_state["yaml_error"] = str(exc)
 
         with btn_col2:
-            if st.button("↩️ Restaurar por defecto"):
+            if st.button("\u21a9\ufe0f Restaurar por defecto"):
                 yaml_path = ROOT / "configs" / "presets.yaml"
                 if yaml_path.exists():
                     st.session_state["yaml_text"] = yaml_path.read_text(encoding="utf-8")
@@ -421,7 +420,7 @@ def main() -> None:
                     st.rerun()
 
         if st.session_state["yaml_error"]:
-            st.error(f"Error de validación: {st.session_state['yaml_error']}")
+            st.error(f"Error de validaci\u00f3n: {st.session_state['yaml_error']}")
 
         if st.session_state["yaml_extra_presets"]:
             st.info(
@@ -429,7 +428,7 @@ def main() -> None:
                 f"{list(st.session_state['yaml_extra_presets'].keys())}"
             )
 
-    # ── Tab: Diagnóstico ──
+    # ── Tab: Diagn\u00f3stico ──
     with tab_diag:
         c1, c2, c3, c4 = st.columns(4)
         summary = scene.summary_dict()
@@ -443,7 +442,7 @@ def main() -> None:
             st.markdown("</div>", unsafe_allow_html=True)
         with c3:
             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-            st.metric("Oblicuidad ψ", f"{summary['psi_deg']:.2f} deg")
+            st.metric("Oblicuidad \u03c8", f"{summary['psi_deg']:.2f} deg")
             st.markdown("</div>", unsafe_allow_html=True)
         with c4:
             st.markdown('<div class="metric-card">', unsafe_allow_html=True)
@@ -456,16 +455,20 @@ def main() -> None:
             st.json(summary)
         with right:
             st.subheader("Estado del sistema")
+            # Compute display values BEFORE the f-string — never put conditional
+            # expressions inside a format specifier (e.g. :.2f if x else 'n/a').
+            _conf_str   = f"{est.confidence:.2f}" if est is not None else "n/a"
+            _method_str = est.method              if est is not None else "n/a"
             st.markdown(
                 f"""
                 | Variable | Valor |
                 |---|---|
                 | Fase actual | **{fsm.label()}** |
-                | X → captura | `{x_to_capture:.3f} m` |
+                | X \u2192 captura | `{x_to_capture:.3f} m` |
                 | Y estimada | `{Y_est:+.4f} m` |
-                | ψ estimada | `{math.degrees(psi_est):+.3f} deg` |
-                | Método est. | `{est.method if est else 'n/a'}` |
-                | Confianza | `{est.confidence:.2f if est else 'n/a'}` |
+                | \u03c8 estimada | `{math.degrees(psi_est):+.3f} deg` |
+                | M\u00e9todo est. | `{_method_str}` |
+                | Confianza | `{_conf_str}` |
                 """
             )
 
