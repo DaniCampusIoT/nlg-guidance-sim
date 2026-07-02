@@ -52,13 +52,21 @@ def plot_scene(
     _style_axes(ax)
     ax.set_aspect("equal")
 
-    x0 = scene.rail_start_x_m
-    x1 = scene.rail_length_m
+    # ── Límites fijos basados en la geometría de la escena, NO en el sensor ──
+    # El eje X muestra desde el inicio de los raíles hasta el NLG + margen.
+    # El alcance del LiDAR no influye en el viewport.
+    x_left  = scene.rail_start_x_m - 0.3
+    x_right = max(
+        scene.capture_x_m + 0.5,          # siempre ver la embocadura completa
+        scene.nlg.center_x_m + 1.8,       # siempre ver el NLG con holgura
+    )
+    half_y = max(1.25, scene.rail_gauge_m * 0.75)
 
-    # Raíles y eje de guía
-    ax.plot([x0, x1], [scene.left_rail_y_m] * 2,  "--", color="#8f8a81", linewidth=1.8)
-    ax.plot([x0, x1], [scene.right_rail_y_m] * 2, "--", color="#8f8a81", linewidth=1.8)
-    ax.plot([x0, x1], [scene.guide_axis_y_m] * 2,  ":", color=MUTED,     linewidth=1.4)
+    # Raíles y eje de guía (longitud = x_right para no dibujar de más)
+    rail_end = x_right
+    ax.plot([scene.rail_start_x_m, rail_end], [scene.left_rail_y_m]  * 2, "--", color="#8f8a81", linewidth=1.8)
+    ax.plot([scene.rail_start_x_m, rail_end], [scene.right_rail_y_m] * 2, "--", color="#8f8a81", linewidth=1.8)
+    ax.plot([scene.rail_start_x_m, rail_end], [scene.guide_axis_y_m] * 2, ":",  color=MUTED,     linewidth=1.4)
 
     # Plataforma
     ax.add_patch(Polygon(scene.platform_body_outline(), closed=True,
@@ -93,7 +101,7 @@ def plot_scene(
         color=RED, length_includes_head=True, zorder=6,
     )
 
-    # ── LiDAR ────────────────────────────────────────────────────────────────
+    # ── LiDAR (los rayos se recortan al viewport con clip_on=True) ───────────
     if scan_result is not None:
         origin = scan_result.origin_xy
         ax.scatter(origin[0], origin[1], color=PRIMARY, s=55, zorder=7)
@@ -143,7 +151,7 @@ def plot_scene(
     # ── Anotaciones de escena ────────────────────────────────────────────────
     ax.annotate(
         "Eje de guía",
-        xy=(scene.rail_length_m - 0.7, scene.guide_axis_y_m + 0.03),
+        xy=(x_right - 1.0, scene.guide_axis_y_m + 0.03),
         fontsize=10, color=TEXT,
     )
     ax.annotate(
@@ -169,24 +177,7 @@ def plot_scene(
     ax.set_title("Escena 2D paramétrica del NLG y plataforma guiada por raíles", fontsize=13)
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
-
-    # ── Límites dinámicos ────────────────────────────────────────────────────
-    x_left = scene.rail_start_x_m - 0.2
-    if scan_result is not None:
-        origin_x  = float(scan_result.origin_xy[0])
-        max_range = float(np.nanmax(scan_result.ranges_m))
-        # Usamos el ángulo medio del haz para estimar la proyección en X
-        angles    = scan_result.angles_rad
-        mid_angle = float(angles[len(angles) // 2])
-        x_reach   = origin_x + max_range * math.cos(mid_angle)
-        x_right   = max(scene.nlg.center_x_m + 1.5, x_reach + 0.5)
-    else:
-        x_right = scene.nlg.center_x_m + 1.5
-
     ax.set_xlim(x_left, x_right)
-
-    # Alto proporcional al ancho, con mínimo de ±1.25 m para ver siempre los raíles
-    half_y = max(1.25, (x_right - x_left) * 0.12)
     ax.set_ylim(-half_y, half_y)
 
     return fig
