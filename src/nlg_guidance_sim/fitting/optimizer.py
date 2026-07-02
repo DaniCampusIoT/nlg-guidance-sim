@@ -76,9 +76,24 @@ def _rect_residuals(
     residuals = np.where(
         inside,
         -min_wall,                          # inside: negative residual
-        np.sqrt(su**2 + sv**2),            # outside: Euclidean distance
+        np.sqrt(su**2 + sv**2),             # outside: Euclidean distance
     )
     return residuals
+
+
+def _safe_n_iter(result) -> int:
+    """Return iteration count from a least_squares result.
+
+    ``result.njev`` (Jacobian evaluations) is ``None`` when
+    ``method='lm'`` because scipy's MINPACK wrapper does not expose it.
+    Fall back to ``result.nfev`` (function evaluations), which is always
+    populated, and further fall back to 0 if even that is None.
+    """
+    njev = getattr(result, "njev", None)
+    if njev is not None:
+        return int(njev)
+    nfev = getattr(result, "nfev", None)
+    return int(nfev) if nfev is not None else 0
 
 
 def refine_pose(
@@ -136,7 +151,7 @@ def refine_pose(
     return RefinedPose(
         xc=float(xc), yc=float(yc), theta_rad=theta,
         width_m=width_m, length_m=length_m,
-        rmse=rmse, n_iter=int(result.njev),
+        rmse=rmse, n_iter=_safe_n_iter(result),
         converged=bool(result.success),
         cost_init=cost_init, cost_final=cost_final,
     )
