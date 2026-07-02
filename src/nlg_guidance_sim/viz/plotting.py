@@ -92,7 +92,8 @@ def plot_scene(
         for i in range(0, len(scan_result.angles_rad), stride):
             p = scan_result.points_xy[i]
             color = CYAN if scan_result.hit_mask[i] else "#b9dfe4"
-            ax.plot([origin[0], p[0]], [origin[1], p[1]], color=color, alpha=0.15, linewidth=0.9)
+            ax.plot([origin[0], p[0]], [origin[1], p[1]],
+                    color=color, alpha=0.15, linewidth=0.9, clip_on=True)
         hits = scan_result.ordered_hit_points()
         if len(hits) > 0:
             ax.scatter(hits[:, 0], hits[:, 1], s=10, color=CYAN, alpha=0.9, zorder=6)
@@ -132,8 +133,33 @@ def plot_scene(
     ax.set_title("Escena 2D paramétrica del NLG y plataforma guiada por raíles", fontsize=13)
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
-    ax.set_xlim(scene.rail_start_x_m-0.1, scene.rail_length_m+0.4)
-    ax.set_ylim(-1.25, 1.25)
+
+    # ── Límites dinámicos ──────────────────────────────────────────────────────
+    # X izquierdo: siempre desde el inicio de los raíles
+    x_left = scene.rail_start_x_m - 0.2
+
+    if scan_result is not None:
+        lidar_x   = float(scan_result.origin_xy[0])
+        # Alcance máximo configurado = valor máximo del array de rangos
+        # (los rayos sin impacto se almacenan a max_range_m)
+        max_range = float(scan_result.ranges_m.max())
+        # El rayo central (0°) apunta en +X; tomamos ese como la frontera derecha del cono
+        angle_min = float(scan_result.angles_rad[0])
+        angle_max = float(scan_result.angles_rad[-1])
+        angle_mid = (angle_min + angle_max) / 2.0
+        x_lidar_reach = lidar_x + max_range * math.cos(angle_mid)
+        x_right = max(scene.nlg.center_x_m + 1.5, x_lidar_reach + 0.5)
+    else:
+        x_right = scene.nlg.center_x_m + 1.5
+
+    ax.set_xlim(x_left, x_right)
+
+    # Y proporcional al ancho de la vista para no achatar la escena,
+    # con un mínimo de ±1.25 m para siempre ver los raíles
+    scene_width = x_right - x_left
+    half_y = max(1.25, scene_width * 0.12)
+    ax.set_ylim(-half_y, half_y)
+
     return fig
 
 
