@@ -31,11 +31,19 @@ class PhaseState:
 
 
 _PHASE_META: dict[Phase, tuple[str, str, str]] = {
-    Phase.UNKNOWN: ("Desconocido", "#aaaaaa", "Sin datos suficientes"),
-    Phase.FAR:     ("Fase 1 - Aproximacion lejana", "#c57b2b", "Guiado grueso: X estimado > zona de captura"),
-    Phase.CAPTURE: ("Fase 2 - Zona de captura", "#01696f", "LM activo: cuna visible, estimando Y y psi"),
-    Phase.LOCKED:  ("Fase 3 - Bloqueado / fino", "#3b6ea8", "Refinamiento milimetrico en rampa"),
+    Phase.UNKNOWN: ("Desconocido",                  "#aaaaaa", "Sin datos suficientes"),
+    Phase.FAR:     ("Fase 1 \u2013 Aproximacion lejana",   "#c57b2b", "Guiado grueso: X estimado > zona de captura"),
+    Phase.CAPTURE: ("Fase 2 \u2013 Zona de captura",       "#01696f", "LM activo: cuna visible, estimando Y y psi"),
+    Phase.LOCKED:  ("Fase 3 \u2013 Bloqueado / fino",      "#3b6ea8", "Refinamiento milim\u00e9trico en rampa"),
 }
+
+# ── Public dicts used by app.py via  fsm.PHASE_COLORS[ph]  /  fsm.PHASE_LABELS[ph] ──
+# Keys are Phase enum members so both  Phase.FAR  and  PhaseState.phase  work:
+#   fsm.PHASE_COLORS[phase_state.phase]   ← preferred usage
+#   fsm.PHASE_LABELS[phase_state.phase]
+PHASE_LABELS: dict[Phase, str]  = {p: meta[0] for p, meta in _PHASE_META.items()}
+PHASE_COLORS: dict[Phase, str]  = {p: meta[1] for p, meta in _PHASE_META.items()}
+PHASE_DESCRIPTIONS: dict[Phase, str] = {p: meta[2] for p, meta in _PHASE_META.items()}
 
 
 def classify_phase(
@@ -69,8 +77,8 @@ def y_alert(y_m: float, y_limit_m: float = 0.25) -> tuple[str, str]:
     if abs(y_m) < y_limit_m * 0.5:
         return "OK Centrado", "#2e7d32"
     if abs(y_m) < y_limit_m:
-        return "WARN Desviacion", "#c57b2b"
-    return "ERROR Fuera de limite", "#b94e48"
+        return "WARN Desviaci\u00f3n", "#c57b2b"
+    return "ERROR Fuera de l\u00edmite", "#b94e48"
 
 
 def psi_alert(psi_deg: float, psi_limit_deg: float = 8.0) -> tuple[str, str]:
@@ -79,4 +87,4 @@ def psi_alert(psi_deg: float, psi_limit_deg: float = 8.0) -> tuple[str, str]:
         return "OK Alineado", "#2e7d32"
     if abs(psi_deg) < psi_limit_deg:
         return "WARN Oblicuidad", "#c57b2b"
-    return "ERROR Angulo excesivo", "#b94e48"
+    return "ERROR \u00c1ngulo excesivo", "#b94e48"
