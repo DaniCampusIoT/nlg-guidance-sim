@@ -22,13 +22,24 @@ from dataclasses import dataclass, field
 # RDP simplification
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _cross2d(u: np.ndarray, v: np.ndarray) -> float:
+    """Scalar cross product of two 2-D vectors: u×v = u[0]*v[1] - u[1]*v[0].
+
+    Replaces np.cross(u, v) for 2-D vectors, which raises ValueError in
+    NumPy ≥2.0 because that version requires 3-D inputs for np.cross.
+    """
+    return float(u[0] * v[1] - u[1] * v[0])
+
+
 def _perp_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
     """Perpendicular distance from point p to line ab."""
     ab = b - a
     norm = float(np.linalg.norm(ab))
     if norm < 1e-12:
         return float(np.linalg.norm(p - a))
-    return abs(float(np.cross(ab, a - p))) / norm
+    # cross product of (b-a) and (a-p) gives the signed area ×2;
+    # dividing by |ab| gives the perpendicular distance.
+    return abs(_cross2d(ab, a - p)) / norm
 
 
 def rdp_simplify(points: np.ndarray, epsilon: float = 0.02) -> np.ndarray:
@@ -80,7 +91,7 @@ def split_and_merge(
 ) -> list[Segment]:
     """Iterative Split-and-Merge line segmentation.
 
-    Returns a list of Segment objects. Each segment's *points* are the
+    Returns a list of Segment objects. Each segment’s *points* are the
     original LiDAR points that belong to that linear piece.
 
     Parameters
@@ -173,7 +184,9 @@ def find_corner_candidates(
             c = pts.mean(axis=0)
             _, _, vt = np.linalg.svd(pts - c)
             direction = vt[0]
-            residuals = np.cross(pts - c, direction)
+            # 2-D scalar cross product for residuals: r_i = (p_i - c) × direction
+            diff = pts - c          # (N, 2)
+            residuals = diff[:, 0] * direction[1] - diff[:, 1] * direction[0]
             return direction / (np.linalg.norm(direction) + 1e-12), c, float((residuals**2).sum())
 
         da, ca, ra = _fit_line(sa.points)
@@ -182,11 +195,11 @@ def find_corner_candidates(
             continue
 
         # Intersection of two lines: ca + t*da = cb + s*db
-        denom = float(da[0] * db[1] - da[1] * db[0])
+        denom = _cross2d(da, db)
         if abs(denom) < 1e-9:
             continue
         diff = cb - ca
-        t = (diff[0] * db[1] - diff[1] * db[0]) / denom
+        t = _cross2d(diff, db) / denom
         corner = ca + t * da
 
         # Interior angle
