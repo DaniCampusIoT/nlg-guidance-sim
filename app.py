@@ -1,3 +1,11 @@
+"""NLG Guidance Sim — Streamlit application.
+
+Pipeline:
+  LiDAR 2D sintético → run_pipeline(hit_points, width_m, length_m)
+  → PipelineResult { coarse: LShapeResult, refined: RefinedPose }
+  → EKF CVTR update
+  → ApproachPhase FSM
+"""
 from __future__ import annotations
 
 import math
@@ -12,10 +20,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from nlg_guidance_sim.catalog.presets import PRESETS
-from nlg_guidance_sim.catalog.yaml_loader import load_yaml_str, merged_presets
+from nlg_guidance_sim.catalog.yaml_loader import load_yaml_str
 from nlg_guidance_sim.estimation.lshape import fit_lshape
 from nlg_guidance_sim.estimation.pose_ekf import PoseEKF
-from nlg_guidance_sim.fitting.pipeline import run_fitting_pipeline
+from nlg_guidance_sim.fitting.pipeline import run_pipeline, PipelineResult
 from nlg_guidance_sim.geometry.nlg_model import NLGModel
 from nlg_guidance_sim.geometry.profiles import Tire2DProfile
 from nlg_guidance_sim.phases.state import ApproachPhase, PhaseState
@@ -58,6 +66,10 @@ def inject_css() -> None:
             display:inline-block; padding:0.25rem 0.7rem; border-radius:999px;
             font-size:0.82rem; font-weight:600; margin-right:0.4rem;
         }
+        .semaforo-dot {
+            display:inline-block; width:18px; height:18px; border-radius:50%;
+            margin-right:6px; vertical-align:middle;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -77,6 +89,42 @@ def _phase_banner(phase: ApproachPhase) -> None:
         unsafe_allow_html=True,
     )
     st.caption(phase.description())
+
+
+def _semaforo(phase: ApproachPhase) -> None:
+    """Traffic-light phase indicator (4 phases = 4 dots)."""
+    phases = [PhaseState.APPROACH, PhaseState.ALIGN, PhaseState.CAPTURE, PhaseState.HOLD]
+    colors = {
+        PhaseState.APPROACH: "#c57b2b",
+        PhaseState.ALIGN:    "#3b6ea8",
+        PhaseState.CAPTURE:  "#437a22",
+        PhaseState.HOLD:     "#01696f",
+    }
+    labels = {
+        PhaseState.APPROACH: "APPROACH",
+        PhaseState.ALIGN:    "ALIGN",
+        PhaseState.CAPTURE:  "CAPTURE",
+        PhaseState.HOLD:     "HOLD",
+    }
+    dots_html = ""
+    for ph in phases:
+        active = ph == phase.state
+        col    = colors[ph]
+        opacity = "1.0" if active else "0.22"
+        ring   = f"box-shadow:0 0 0 3px {col}55;" if active else ""
+        dots_html += (
+            f'<span style="display:inline-flex;align-items:center;margin-right:1.1rem;">'
+            f'<span class="semaforo-dot" style="background:{col};opacity:{opacity};{ring}"></span>'
+            f'<span style="font-size:0.82rem;font-weight:{"700" if active else "400"};">'
+            f'{labels[ph]}</span></span>'
+        )
+    st.markdown(
+        f'<div style="padding:0.6rem 1rem;background:rgba(255,255,255,0.6);'
+        f'border-radius:12px;border:1px solid rgba(40,37,29,0.08);'
+        f'display:flex;align-items:center;flex-wrap:wrap;gap:0.3rem;">'
+        f'{dots_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ─── sidebar ──────────────────────────────────────────────────────────────────
@@ -190,22 +238,22 @@ def main() -> None:
     inject_css()
 
     # ── Session state ─────────────────────────────────────────────────────────
-    if "yaml_text"           not in st.session_state:
+    if "yaml_text" not in st.session_state:
         yaml_path = ROOT / "configs" / "presets.yaml"
         st.session_state["yaml_text"] = yaml_path.read_text(encoding="utf-8") if yaml_path.exists() else ""
-    if "yaml_extra_presets"  not in st.session_state:
+    if "yaml_extra_presets" not in st.session_state:
         st.session_state["yaml_extra_presets"] = {}
-    if "yaml_error"          not in st.session_state:
+    if "yaml_error" not in st.session_state:
         st.session_state["yaml_error"] = ""
-    if "fsm"                 not in st.session_state:
+    if "fsm" not in st.session_state:
         st.session_state["fsm"] = ApproachPhase()
-    if "pose_ekf"            not in st.session_state:
+    if "pose_ekf" not in st.session_state:
         st.session_state["pose_ekf"] = PoseEKF()
 
     st.title("Simulador interactivo del tren delantero")
     st.caption(
         "Geometría paramétrica · LiDAR 2D sintético · "
-        "L-shape (Zhang 2015) · Fitting GN/LM con prior rígido · "
+        "L-shape coarse (Zhang 2015) · Fitting LM con prior rígido · "
         "EKF CVTR (Cellina et al. 2025) · Fases de aproximación · YAML presets"
     )
 
@@ -213,46 +261,57 @@ def main() -> None:
     scene, lidar = build_scene_and_sensor(
         extra_presets=st.session_state["yaml_extra_presets"]
     )
-    scan     = lidar.scan(scene) if lidar is not None else None
-    hit_pts  = scan.ordered_hit_points() if scan is not None else None
+    scan    = lidar.scan(scene) if lidar is not None else None
+    hit_pts = scan.ordered_hit_points() if scan is not None else None
 
-    # ── Stage 1: L-shape (Search-Based, Zhang 2015) ──────────────────────────
+    # ── Stage 1: L-shape coarse (Zhang 2015) — lightweight estimation ────────
     est = None
     if hit_pts is not None and len(hit_pts) >= 4:
         est = fit_lshape(hit_pts)
 
-    # ── Stage 2: GN/LM with rigid prior (MDPI 2026 + Cellina 2025) ──────────
-    fit_res = None
-    preset_for_fit = list(PRESETS.values())[0]   # fallback
+    # ── Stage 1+2: Full pipeline — L-shape seed → LM refinement ─────────────
+    # run_pipeline(hit_points, width_m, length_m) → PipelineResult
+    fit_res: PipelineResult | None = None
     if hit_pts is not None and len(hit_pts) >= 6:
-        # W and L come from the active scene's NLG profile — the "known prior"
         W_prior = scene.nlg.tire_profile.tire_width_m
         L_prior = scene.nlg.tire_profile.tire_length_m
-        fit_res = run_fitting_pipeline(hit_pts, W_real=W_prior, L_real=L_prior)
+        fit_res = run_pipeline(
+            hit_points=hit_pts,
+            width_m=W_prior,
+            length_m=L_prior,
+        )
 
     # ── EKF CVTR update ──────────────────────────────────────────────────────
     ekf: PoseEKF = st.session_state["pose_ekf"]
     if fit_res is not None:
-        cxy = fit_res.fit.center_xy()
+        ref = fit_res.refined
         if not ekf.initialized:
-            ekf.initialize(cxy[0], cxy[1], fit_res.psi_rad)
+            ekf.initialize(ref.xc, ref.yc, ref.theta_rad)
         else:
             ekf.predict(dt=0.05)
-            ekf.update(cxy[0], cxy[1])
+            ekf.update(ref.xc, ref.yc)
 
     # ── Phase FSM ────────────────────────────────────────────────────────────
     fsm: ApproachPhase = st.session_state["fsm"]
     x_to_capture = max(0.0, scene.capture_x_m - scene.nlg.center_x_m)
-    Y_est   = fit_res.Y_m if fit_res is not None else (
-                  est.Y_m if est is not None else scene.nlg.center_y_m)
-    psi_est = fit_res.psi_rad if fit_res is not None else (
-                  est.psi_rad if est is not None else scene.nlg.psi_rad)
+
+    if fit_res is not None:
+        Y_est   = fit_res.Y_m
+        psi_est = fit_res.refined.theta_rad
+    elif est is not None:
+        Y_est   = est.Y_m
+        psi_est = est.psi_rad
+    else:
+        Y_est   = scene.nlg.center_y_m
+        psi_est = scene.nlg.psi_rad
+
     fsm.update(x_to_capture=x_to_capture, Y_m=Y_est, psi_rad=psi_est)
 
     # ── Tabs ─────────────────────────────────────────────────────────────────
-    tab_scene, tab_lidar, tab_est, tab_fit, tab_phases, tab_yaml, tab_diag = st.tabs(
-        ["Escena", "LiDAR 2D", "Estimación Y/ψ", "Fitting GN/LM", "Fases", "Editor YAML", "Diagnóstico"]
-    )
+    tab_scene, tab_lidar, tab_est, tab_fit, tab_phases, tab_yaml, tab_diag = st.tabs([
+        "Escena", "LiDAR 2D", "Estimación Y/ψ",
+        "🔧 Fitting", "🚦 Fases", "Editor YAML", "Diagnóstico",
+    ])
 
     # ── Tab: Escena ──────────────────────────────────────────────────────────
     with tab_scene:
@@ -294,86 +353,125 @@ def main() -> None:
             st.markdown("")
             fig_est = plot_estimation(scene, est)
             st.pyplot(fig_est, use_container_width=True)
-            with st.expander("ℹ️ Método L-shape (CISRAM 2015)"):
+            with st.expander("ℹ️ Método L-shape coarse (CISRAM 2015)"):
                 st.markdown(
-                    "Barre **N_THETA = 180** orientaciones candidatas en [0, π). "
-                    "El criterio de coste es la suma de residuos cuadráticos "
-                    "perpendiculares a las dos rectas ajustadas (Zhang et al. 2015). "
+                    "Barre **N_THETA** orientaciones candidatas en [0, 90°). "
+                    "Criterio: suma de residuos cuadráticos perpendiculares a las dos rectas "
+                    "ajustadas (Zhang et al. CISRAM 2015). "
                     "Fallbacks: `line` si <2 segmentos válidos, `centroid` si <8 puntos."
                 )
 
     # ── Tab: Fitting GN/LM ───────────────────────────────────────────────────
     with tab_fit:
-        st.subheader("Pipeline: RDP seed → Gauss-Newton / Levenberg-Marquardt")
+        st.subheader("Pipeline: L-shape seed → Levenberg-Marquardt")
         st.caption(
-            "W y L del neumático se fijan desde el preset (prior rígido). "
+            "W y L del neumático se fijan como prior rígido desde el preset. "
             "Solo se optimizan (xc, yc, θ). "
-            "Referencias: MDPI 2026 (Rectangle Edge Matching) · Cellina et al. arXiv 2025."
+            "Refs: Zhang CISRAM 2015 · MDPI 2026 · Cellina arXiv 2025."
         )
 
         if fit_res is None:
-            st.warning("No hay suficientes puntos LiDAR (mín. 6). Activa el LiDAR y acerca el tren.")
+            st.warning(
+                "No hay suficientes puntos LiDAR (mín. 6). "
+                "Activa el LiDAR y acerca el tren a la plataforma."
+            )
         else:
-            # ── Metrics row ──
-            m1, m2, m3, m4, m5 = st.columns(5)
-            lm_chip_color = "#2e7d32" if fit_res.converged else "#b94e48"
-            lm_label      = "✓ LM converged" if fit_res.converged else "✗ LM not converged"
+            ref = fit_res.refined
+
+            # ── Semáforo de fase ──────────────────────────────────────────────
+            st.markdown("#### Fase de aproximación")
+            _semaforo(fsm)
+            st.markdown("")
+
+            # ── Fila de métricas LM ───────────────────────────────────────────
+            st.markdown("#### Métricas LM")
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
+
+            lm_ok    = ref.converged
+            chip_col = "#2e7d32" if lm_ok else "#b94e48"
+            chip_lbl = "✓ LM converged" if lm_ok else "✗ LM not converged"
+
+            y_err_mm  = (fit_res.Y_m - scene.nlg.center_y_m) * 1000.0
+            psi_err   = fit_res.psi_deg - math.degrees(scene.nlg.psi_rad)
+            cost_drop = fit_res.coarse.cost - ref.cost_final
 
             with m1:
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                 st.metric("Y (LM)", f"{fit_res.Y_m:+.4f} m",
-                          delta=f"err {(fit_res.Y_m - scene.nlg.center_y_m)*1000:+.1f} mm")
+                          delta=f"err {y_err_mm:+.1f} mm")
                 st.markdown("</div>", unsafe_allow_html=True)
             with m2:
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                 st.metric("ψ (LM)", f"{fit_res.psi_deg:+.3f}°",
-                          delta=f"err {fit_res.psi_deg - math.degrees(scene.nlg.psi_rad):+.3f}°")
+                          delta=f"err {psi_err:+.3f}°")
                 st.markdown("</div>", unsafe_allow_html=True)
             with m3:
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.metric("RMSE", f"{fit_res.rmse_m*100:.2f} cm")
+                st.metric("RMSE", f"{ref.rmse * 100:.2f} cm")
                 st.markdown("</div>", unsafe_allow_html=True)
             with m4:
                 st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-                st.metric("Iteraciones LM", str(fit_res.fit.n_iter))
+                st.metric("Iteraciones LM", str(ref.n_iter))
                 st.markdown("</div>", unsafe_allow_html=True)
             with m5:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Tiempo [ms]", f"{fit_res.elapsed_ms:.1f}")
+                st.markdown("</div>", unsafe_allow_html=True)
+            with m6:
                 st.markdown(
-                    f'<div class="metric-card"><span class="fit-chip" '
-                    f'style="background:{lm_chip_color};color:#fff">{lm_label}</span>\''
-                    f'<br><span class="small-note">θ₀ RDP: {math.degrees(fit_res.seed_theta_rad):+.2f}°</span></div>',
+                    f'<div class="metric-card">'
+                    f'<span class="fit-chip" style="background:{chip_col};color:#fff">{chip_lbl}</span>'
+                    f'<br><span class="small-note">Δcosto: {cost_drop:+.5f}</span>'
+                    f'<br><span class="small-note">{fit_res.n_points_used} puntos</span>'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
 
             st.markdown("")
 
-            # ── Two-column layout: scene overlay + EKF history ──
+            # ── Prior rígido: W, L ────────────────────────────────────────────
+            pr1, pr2, pr3 = st.columns(3)
+            with pr1:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("W prior [m]", f"{ref.width_m:.3f}")
+                st.markdown("</div>", unsafe_allow_html=True)
+            with pr2:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("L prior [m]", f"{ref.length_m:.3f}")
+                st.markdown("</div>", unsafe_allow_html=True)
+            with pr3:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric("Costo coarse (L-shape)", f"{fit_res.coarse.cost:.5f}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("")
+
+            # ── Visualización: escena + EKF ───────────────────────────────────
             col_l, col_r = st.columns([1.1, 0.9])
 
             with col_l:
-                st.markdown("**Escena con rectángulo ajustado**")
+                st.markdown("**Escena con rectángulo LM ajustado**")
                 fig_fit = plot_fitting(scene, fit_res)
                 st.pyplot(fig_fit, use_container_width=True)
 
             with col_r:
                 st.markdown("**EKF CVTR — Historial Y / ψ**")
-                ekf_history = ekf.history
                 fig_ekf = plot_ekf_history(
-                    ekf_history,
+                    ekf.history,
                     true_Y=float(scene.nlg.center_y_m),
                     true_psi_deg=float(math.degrees(scene.nlg.psi_rad)),
                 )
                 st.pyplot(fig_ekf, use_container_width=True)
 
-                # EKF current state
                 if ekf.initialized:
-                    st.markdown("**Estado EKF actual**")
                     eks = ekf.state
+                    st.markdown("**Estado EKF actual**")
                     st.markdown(
                         f"| Variable | EKF | Real |\n"
                         f"|---|---|---|\n"
                         f"| Y [m] | `{eks.y:+.4f}` | `{scene.nlg.center_y_m:+.4f}` |\n"
-                        f"| ψ [deg] | `{math.degrees(eks.theta):+.3f}` | `{math.degrees(scene.nlg.psi_rad):+.3f}` |\n"
+                        f"| ψ [deg] | `{math.degrees(eks.theta):+.3f}` | "
+                        f"`{math.degrees(scene.nlg.psi_rad):+.3f}` |\n"
                         f"| v [m/s] | `{eks.v:.3f}` | — |\n"
                         f"| ω [rad/s] | `{eks.omega:.4f}` | — |\n"
                     )
@@ -382,36 +480,35 @@ def main() -> None:
                     st.session_state["pose_ekf"] = PoseEKF()
                     st.rerun()
 
-            # ── Expander: method details ──
+            # ── Detalle matemático ────────────────────────────────────────────
             with st.expander("ℹ️ Pipeline de dos etapas — detalle matemático"):
                 st.markdown(
                     r"""
-**Etapa 1 — Semilla RDP** (Ramer-Douglas-Peucker)
+**Etapa 1 — L-shape Search** (Zhang et al. CISRAM 2015)
 
-Sobre la nube ordenada por ángulo $\{p_i\}$, se busca el índice
-$k^* = \arg\max_k\, d_\perp(p_k, \overline{p_0 p_N})$.
-
-Ese punto es el vértice de la L. El brazo dominante define $\theta_0$.
+Barre θ ∈ [0°, 90°) con paso configurable. Para cada θ se computa
+el coste como la suma de distancias cuadráticas perpendiculares al
+rectángulo de dimensiones fijas (W, L). Se refina con minimización
+escalar (`scipy.minimize_scalar`) alrededor del mínimo coarse.
 
 ---
 
 **Etapa 2 — Levenberg-Marquardt con prior rígido** (MDPI 2026)
 
-Estado: $\mathbf{x} = [x_c,\; y_c,\; \theta]^T$. Las dimensiones $W$ y $L$ son **constantes** del preset.
+Estado: $\mathbf{x} = [x_c,\; y_c,\; \theta]^T$. W y L son **constantes** del preset.
 
 Residuo por punto:
-$$r_i(\mathbf{x}) = \min_j\, d_\perp\!\left(p_i,\; \text{borde}_j(\mathbf{x}, W, L)\right)$$
+$$r_i(\mathbf{x}) = d_\perp\!\left(p_i,\; \text{lado más cercano}(\mathbf{x}, W, L)\right)$$
 
-Actualización LM:
+Actualización LM (scipy `least_squares`, method=`'lm'`):
 $$\mathbf{x}_{k+1} = \mathbf{x}_k - \bigl(\mathbf{J}^T\mathbf{J} + \lambda\,\mathrm{diag}(\mathbf{J}^T\mathbf{J})\bigr)^{-1}\mathbf{J}^T\mathbf{r}(\mathbf{x}_k)$$
 
 ---
 
 **Etapa 3 — EKF CVTR** (Cellina et al. arXiv 2025, eq. 6)
 
-$\mathbf{X} = [x, y, \theta, v, \omega]^T$. Medición: sólo $[x_c, y_c]$ (sin $\theta$ directo).
+$\mathbf{X} = [x, y, \theta, v, \omega]^T$. Medición: $[x_c, y_c]$.
 
-Modelo de movimiento:
 $$x_{k+1} = x_k + v_k \cos\theta_k\,\Delta t, \quad y_{k+1} = y_k + v_k \sin\theta_k\,\Delta t$$
 """
                 )
@@ -491,7 +588,9 @@ presets:
             if st.button("✅ Aplicar presets", type="primary"):
                 try:
                     new_p = load_yaml_str(edited)
-                    st.session_state.update(yaml_text=edited, yaml_extra_presets=new_p, yaml_error="")
+                    st.session_state.update(
+                        yaml_text=edited, yaml_extra_presets=new_p, yaml_error=""
+                    )
                     st.success(f"{len(new_p)} preset(s): {list(new_p.keys())}")
                     st.rerun()
                 except Exception as exc:
@@ -529,10 +628,12 @@ presets:
             st.json(summary)
         with right:
             st.subheader("Estado del sistema")
-            _conf   = f"{est.confidence:.2f}" if est is not None else "n/a"
-            _method = est.method              if est is not None else "n/a"
-            _fit_rmse = f"{fit_res.rmse_m*100:.2f} cm" if fit_res is not None else "n/a"
-            _fit_iter = str(fit_res.fit.n_iter) if fit_res is not None else "n/a"
+            _conf     = f"{est.confidence:.2f}" if est is not None else "n/a"
+            _method   = est.method              if est is not None else "n/a"
+            _rmse     = f"{fit_res.refined.rmse*100:.2f} cm" if fit_res is not None else "n/a"
+            _iters    = str(fit_res.refined.n_iter)          if fit_res is not None else "n/a"
+            _conv     = str(fit_res.refined.converged)       if fit_res is not None else "n/a"
+            _elapsed  = f"{fit_res.elapsed_ms:.1f} ms"       if fit_res is not None else "n/a"
             st.markdown(
                 f"""| Variable | Valor |
 |---|---|
@@ -542,8 +643,10 @@ presets:
 | ψ estimada | `{math.degrees(psi_est):+.3f}°` |
 | Método L-shape | `{_method}` |
 | Confianza L-shape | `{_conf}` |
-| RMSE GN/LM | `{_fit_rmse}` |
-| Iters LM | `{_fit_iter}` |
+| RMSE LM | `{_rmse}` |
+| Iters LM | `{_iters}` |
+| LM converged | `{_conv}` |
+| Tiempo pipeline | `{_elapsed}` |
 | EKF init | `{ekf.initialized}` |
 """
             )
