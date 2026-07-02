@@ -42,6 +42,10 @@ class LShapeFitResult:
     method:    str            # 'lshape' | 'line' | 'centroid'
 
 
+# Backward-compatibility alias so any code that imports LShapeResult still works
+LShapeResult = LShapeFitResult
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
