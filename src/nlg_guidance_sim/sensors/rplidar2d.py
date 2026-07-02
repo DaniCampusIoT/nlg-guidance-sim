@@ -27,13 +27,22 @@ class ScanResult:
 
 @dataclass
 class RPLidar2DSim:
+    """Simulador del Slamtec S2E (DTOF 360°).
+
+    Defaults calibrados con la hoja de especificaciones oficial:
+      - 32 000 muestras/s ÷ 10 Hz → 3 200 haces/vuelta
+      - Resolución angular: 0.1125°
+      - Alcance máximo (90 % reflectividad): 30 m
+      - Precisión: ±30 mm  →  noise_std = 0.030 m
+      - Rango ciego mínimo: 0.05 m
+    """
     origin_x_m: float = 1.28
     origin_y_m: float = 0.0
     angle_min_deg: float = -60.0
     angle_max_deg: float = 60.0
-    num_beams: int = 360
-    max_range_m: float = 5.0
-    range_noise_std_m: float = 0.002
+    num_beams: int = 3200           # 32 000 pts/s ÷ 10 Hz
+    max_range_m: float = 30.0       # 90 % reflectividad
+    range_noise_std_m: float = 0.030  # ±30 mm
     seed: int = 7
 
     def origin(self) -> np.ndarray:
@@ -77,8 +86,8 @@ class RPLidar2DSim:
             return False, np.inf, np.array([np.nan, np.nan])
 
         diff = p1 - ray_origin
-        t    = cross2d(diff, seg)      / denom
-        u    = cross2d(diff, ray_dir)  / denom
+        t    = cross2d(diff, seg)     / denom
+        u    = cross2d(diff, ray_dir) / denom
 
         if t >= 0.0 and 0.0 <= u <= 1.0:
             return True, float(t), ray_origin + t * ray_dir
