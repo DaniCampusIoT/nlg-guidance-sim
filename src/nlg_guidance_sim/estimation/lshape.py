@@ -11,30 +11,35 @@ to the hit points returned by the synthetic RPLidar and extract:
 
 Fallback: if too few hit points are available (< MIN_POINTS) the
 estimator returns a centroid-only result flagged as low-confidence.
+
+Complexity
+----------
+The inner split-search is fully vectorised with cumulative sums so the
+total cost is O(N_THETA * N) instead of O(N_THETA * N²).
+At 1440 beams and 180 orientations this is ~260k ops vs 373M.
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
-MIN_POINTS = 8          # below this we fall back to centroid
-N_THETA = 180           # angular resolution for the search grid
+MIN_POINTS = 8      # below this we fall back to centroid
+N_THETA    = 180    # angular resolution for the search grid
 
 
 @dataclass
 class LShapeFitResult:
-    Y_m: float                    # estimated lateral offset [m]
-    psi_rad: float                # estimated heading [rad]
-    psi_deg: float                # same in degrees
-    corner_xy: np.ndarray         # estimated L-corner in world frame
-    seg1_pts: np.ndarray          # points assigned to segment 1
-    seg2_pts: np.ndarray          # points assigned to segment 2
-    rmse_m: float                 # fit residual [m]
-    confidence: float             # 0..1  (1 = full L-fit, <0.5 = fallback)
-    method: str                   # 'lshape' | 'line' | 'centroid'
+    Y_m:       float          # estimated lateral offset [m]
+    psi_rad:   float          # estimated heading [rad]
+    psi_deg:   float          # same in degrees
+    corner_xy: np.ndarray     # estimated L-corner in world frame
+    seg1_pts:  np.ndarray     # points assigned to segment 1
+    seg2_pts:  np.ndarray     # points assigned to segment 2
+    rmse_m:    float          # fit residual [m]
+    confidence: float         # 0..1  (1 = full L-fit, <0.5 = fallback)
+    method:    str            # 'lshape' | 'line' | 'centroid'
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +47,7 @@ class LShapeFitResult:
 # ---------------------------------------------------------------------------
 
 def _line_residuals(pts: np.ndarray, theta: float) -> np.ndarray:
-    """Perpendicular distances from points to a line with normal (cos θ, sin θ)."""
+    """Perpendicular distances from points to a line with normal (cosθ, sinθ)."""
     n = np.array([math.cos(theta), math.sin(theta)])
     return pts @ n
 
@@ -52,44 +57,106 @@ def _fit_line_to_pts(pts: np.ndarray) -> tuple[float, float]:
     The line equation is  x*cos(θ) + y*sin(θ) = ρ.
     """
     if len(pts) < 2:
-        return 0.0, float(np.mean(pts[:, 0])) if len(pts) else 0.0
+        return 0.0, float(pts[0, 0]) if len(pts) else 0.0
     centroid = pts.mean(axis=0)
     _, _, Vt = np.linalg.svd(pts - centroid)
-    tangent = Vt[0]                          # principal direction
-    normal = np.array([-tangent[1], tangent[0]])
-    theta = math.atan2(normal[1], normal[0])
-    rho = float(centroid @ normal)
+    tangent = Vt[0]
+    normal  = np.array([-tangent[1], tangent[0]])
+    theta   = math.atan2(normal[1], normal[0])
+    rho     = float(centroid @ normal)
     return theta, rho
 
 
-def _split_at_corner(pts: np.ndarray, theta: float) -> tuple[np.ndarray, np.ndarray, float]:
-    """Project points onto direction θ and find the split that minimises
-    total perpendicular-distance variance on both sides (L-search criterion).
-    Returns (seg1, seg2, corner_param).
+def _split_cost_vectorised(pts_sorted: np.ndarray, theta: float) -> int:
+    """Find the split index k that minimises the total within-segment
+    perpendicular-residual variance using O(N) cumulative sums.
+
+    For a set of scalars r = pts @ normal, the residual sum-of-squares
+    around the segment mean equals:
+        SS = Σr² - (Σr)²/n
+    We compute prefix and suffix variants with cumsum/cumsum-of-squares.
     """
-    t = np.array([math.cos(theta), math.sin(theta)])
+    normal = np.array([math.cos(theta), math.sin(theta)])
+    r = pts_sorted @ normal          # (N,) projections onto normal
+
+    n = len(r)
+    if n < 4:
+        return n // 2
+
+    r2 = r ** 2
+    # Prefix sums (indices 0..k-1  have k elements)
+    cum_r  = np.cumsum(r)
+    cum_r2 = np.cumsum(r2)
+
+    # Suffix sums (indices k..n-1  have n-k elements)
+    total_r  = cum_r[-1]
+    total_r2 = cum_r2[-1]
+    suf_r  = total_r  - cum_r
+    suf_r2 = total_r2 - cum_r2
+
+    # Valid split range: both segments have ≥2 points
+    ks = np.arange(2, n - 2)          # shape (n-4,)
+    pre_n = ks.astype(float)
+    suf_n = (n - ks).astype(float)
+
+    ss_pre = cum_r2[ks - 1] - cum_r[ks - 1] ** 2 / pre_n
+    ss_suf = suf_r2[ks]     - suf_r[ks]     ** 2 / suf_n
+
+    costs = ss_pre + ss_suf
+    return int(ks[np.argmin(costs)])
+
+
+def _best_theta_vectorised(pts: np.ndarray) -> float:
+    """Search over N_THETA orientations and return the one with minimum
+    total within-segment SS (vectorised over k for each theta)."""
+    thetas = np.linspace(0.0, math.pi, N_THETA, endpoint=False)
+    best_cost  = np.inf
+    best_theta = 0.0
+
+    for theta in thetas:
+        t = np.array([math.cos(theta), math.sin(theta)])
+        params = pts @ t
+        order  = np.argsort(params)
+        pts_s  = pts[order]
+
+        # Compute cost for the best split at this theta in O(N)
+        normal = np.array([math.cos(theta), math.sin(theta)])
+        r      = pts_s @ normal
+        n      = len(r)
+        if n < 4:
+            continue
+
+        r2     = r ** 2
+        cum_r  = np.cumsum(r)
+        cum_r2 = np.cumsum(r2)
+        suf_r  = cum_r[-1]  - cum_r
+        suf_r2 = cum_r2[-1] - cum_r2
+
+        ks    = np.arange(2, n - 2)
+        pre_n = ks.astype(float)
+        suf_n = (n - ks).astype(float)
+
+        ss_pre = cum_r2[ks - 1] - cum_r[ks - 1] ** 2 / pre_n
+        ss_suf = suf_r2[ks]     - suf_r[ks]     ** 2 / suf_n
+
+        c = float(np.min(ss_pre + ss_suf))
+        if c < best_cost:
+            best_cost  = c
+            best_theta = theta
+
+    return best_theta
+
+
+def _split_at_corner(
+    pts: np.ndarray, theta: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split pts into two arms at the optimal k for the given theta."""
+    t      = np.array([math.cos(theta), math.sin(theta)])
     params = pts @ t
-    order = np.argsort(params)
-    pts_sorted = pts[order]
-    params_sorted = params[order]
-    n = len(pts_sorted)
-
-    best_cost = np.inf
-    best_k = n // 2
-
-    for k in range(2, n - 2):
-        seg1 = pts_sorted[:k]
-        seg2 = pts_sorted[k:]
-        _, r1 = _fit_line_to_pts(seg1)
-        _, r2 = _fit_line_to_pts(seg2)
-        res1 = _line_residuals(seg1, theta) - r1
-        res2 = _line_residuals(seg2, theta) - r2
-        cost = float(np.sum(res1 ** 2) + np.sum(res2 ** 2))
-        if cost < best_cost:
-            best_cost = cost
-            best_k = k
-
-    return pts_sorted[:best_k], pts_sorted[best_k:], float(params_sorted[best_k])
+    order  = np.argsort(params)
+    pts_s  = pts[order]
+    k      = _split_cost_vectorised(pts_s, theta)
+    return pts_s[:k], pts_s[k:]
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +169,8 @@ def fit_lshape(hit_pts: np.ndarray) -> LShapeFitResult:
     Strategy
     --------
     1. Search over N_THETA candidate orientations θ in [0, π).
-    2. For each θ, split the sorted projection into two arms and compute
-       the total perpendicular residual (CISRAM 2015 cost function).
+    2. For each θ find the split k that minimises total within-segment
+       perpendicular-residual variance (O(N) via cumulative sums).
     3. Pick the θ with minimum cost → defines the L orientation.
     4. Fit lines to each arm and intersect them → corner estimate.
     5. Derive Y and ψ from the corner and arm directions.
@@ -111,31 +178,8 @@ def fit_lshape(hit_pts: np.ndarray) -> LShapeFitResult:
     if len(hit_pts) < MIN_POINTS:
         return _fallback_centroid(hit_pts)
 
-    thetas = np.linspace(0.0, math.pi, N_THETA, endpoint=False)
-    best_cost = np.inf
-    best_theta = 0.0
-
-    for theta in thetas:
-        t = np.array([math.cos(theta), math.sin(theta)])
-        params = hit_pts @ t
-        order = np.argsort(params)
-        pts_s = hit_pts[order]
-        n = len(pts_s)
-        costs = []
-        for k in range(2, n - 2):
-            s1, s2 = pts_s[:k], pts_s[k:]
-            _, r1 = _fit_line_to_pts(s1)
-            _, r2 = _fit_line_to_pts(s2)
-            res1 = _line_residuals(s1, theta) - r1
-            res2 = _line_residuals(s2, theta) - r2
-            costs.append(float(np.sum(res1 ** 2) + np.sum(res2 ** 2)))
-        if costs:
-            c = min(costs)
-            if c < best_cost:
-                best_cost = c
-                best_theta = theta
-
-    seg1, seg2, _ = _split_at_corner(hit_pts, best_theta)
+    best_theta = _best_theta_vectorised(hit_pts)
+    seg1, seg2 = _split_at_corner(hit_pts, best_theta)
 
     if len(seg1) < 2 or len(seg2) < 2:
         return _fallback_line(hit_pts)
@@ -154,24 +198,21 @@ def fit_lshape(hit_pts: np.ndarray) -> LShapeFitResult:
     except np.linalg.LinAlgError:
         return _fallback_line(hit_pts)
 
-    # psi = angle of the axle arm (the arm more perpendicular to X axis)
-    # We pick the arm whose normal is closer to the Y direction.
+    # psi = angle of the arm whose normal is closer to the Y direction
     psi_candidate1 = theta1 - math.pi / 2.0
     psi_candidate2 = theta2 - math.pi / 2.0
-    # Normalise to (-pi/2, pi/2)
     psi_rad = _normalise_angle(psi_candidate1)
     if abs(math.sin(theta2)) > abs(math.sin(theta1)):
         psi_rad = _normalise_angle(psi_candidate2)
 
-    Y_m = float(corner[1])   # Y coordinate of corner = lateral offset estimate
+    Y_m = float(corner[1])
 
-    # RMSE over all points
     all_res = np.concatenate([
         _line_residuals(seg1, theta1) - rho1,
         _line_residuals(seg2, theta2) - rho2,
     ])
-    rmse = float(np.sqrt(np.mean(all_res ** 2)))
-    confidence = max(0.0, min(1.0, 1.0 - rmse / 0.05))   # normalised to 5 cm
+    rmse       = float(np.sqrt(np.mean(all_res ** 2)))
+    confidence = max(0.0, min(1.0, 1.0 - rmse / 0.05))
 
     return LShapeFitResult(
         Y_m=Y_m,
@@ -197,10 +238,10 @@ def estimate_pose(hit_pts: np.ndarray) -> LShapeFitResult:
 
 def _fallback_line(pts: np.ndarray) -> LShapeFitResult:
     theta, rho = _fit_line_to_pts(pts)
-    psi_rad = _normalise_angle(theta - math.pi / 2.0)
-    centroid = pts.mean(axis=0)
-    res = _line_residuals(pts, theta) - rho
-    rmse = float(np.sqrt(np.mean(res ** 2)))
+    psi_rad    = _normalise_angle(theta - math.pi / 2.0)
+    centroid   = pts.mean(axis=0)
+    res        = _line_residuals(pts, theta) - rho
+    rmse       = float(np.sqrt(np.mean(res ** 2)))
     return LShapeFitResult(
         Y_m=float(centroid[1]),
         psi_rad=psi_rad,
@@ -233,7 +274,7 @@ def _fallback_centroid(pts: np.ndarray) -> LShapeFitResult:
 
 
 def _normalise_angle(a: float) -> float:
-    """Wrap angle to (-pi/2, pi/2)."""
+    """Wrap angle to (-π/2, π/2)."""
     while a > math.pi / 2:
         a -= math.pi
     while a < -math.pi / 2:
