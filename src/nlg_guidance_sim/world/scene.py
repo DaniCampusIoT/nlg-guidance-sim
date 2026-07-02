@@ -49,8 +49,8 @@ class Scene:
             [
                 [x0, -half],
                 [x1, -half],
-                [x1, half],
-                [x0, half],
+                [x1,  half],
+                [x0,  half],
             ],
             dtype=float,
         )
@@ -58,20 +58,36 @@ class Scene:
     def ramp_outline(self) -> np.ndarray:
         x0 = self.platform_body_end_x_m
         x1 = self.capture_x_m
-        half_body = self.platform_width_m / 2.0
-        half_capture = self.capture_width_m / 2.0
+        half_body    = self.platform_width_m  / 2.0
+        half_capture = self.capture_width_m   / 2.0
         return np.array(
             [
                 [x0, -half_body],
                 [x1, -half_capture],
-                [x1, half_capture],
-                [x0, half_body],
+                [x1,  half_capture],
+                [x0,  half_body],
             ],
             dtype=float,
         )
 
-    def scan_obstacle_polygons(self) -> list[np.ndarray]:
-        polygons = [self.platform_body_outline(), self.ramp_outline()]
+    def scan_obstacle_polygons(
+        self,
+        include_platform: bool = False,
+    ) -> list[np.ndarray]:
+        """Devuelve los polígonos que el LiDAR debe ver.
+
+        Parameters
+        ----------
+        include_platform:
+            Si es True, añade la plataforma (cuerpo + rampa) como obstáculo.
+            Por defecto False: el LiDAR está montado en la plataforma y no
+            debe detectar su propia estructura.  Actívalo si quieres modelar
+            la plataforma como clutter y filtrarlo en etapas posteriores.
+        """
+        polygons: list[np.ndarray] = []
+        if include_platform:
+            polygons.append(self.platform_body_outline())
+            polygons.append(self.ramp_outline())
         polygons.extend(self.nlg.wheel_contours_world())
         return polygons
 
