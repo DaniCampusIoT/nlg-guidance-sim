@@ -1,91 +1,140 @@
-"""Two-stage fitting pipeline: RDP seed → Gauss-Newton / Levenberg-Marquardt.
+"""
+Full two-stage fitting pipeline.
 
-Stage 1 (fast heuristic)
-  Ramer-Douglas-Peucker finds the L-corner and computes θ₀ from the dominant arm.
-  This seed prevents the LM optimiser from converging to the mirrored local minimum
-  (the 'L-flip' problem identified in Zhang et al. CISRAM 2015).
+Stage 1: Search-Based L-shape (LShapeFit) -> coarse pose (xc, yc, theta)
+Stage 2: Levenberg-Marquardt refinement (refine_pose) -> precise pose
 
-Stage 2 (non-linear refinement)
-  scipy.optimize.least_squares (method='lm') minimises the sum of squared
-  point-to-nearest-edge distances, with W_real and L_real FIXED from the
-  AircraftPreset dimensions.  Only (xc, yc, θ) are free.
+Usage
+-----
+    from nlg_guidance_sim.fitting.pipeline import run_pipeline, PipelineResult
 
-References
-----------
-MDPI 2026  — Vehicle Speed Estimation via Rectangle Edge Matching (Gauss-Newton)
-Cellina et al. arXiv 2025 — a-priori known vehicle size + Variance Minimisation seed
+    result = run_pipeline(
+        hit_points=scan.ordered_hit_points(),
+        width_m=preset.tire_width_m,
+        length_m=preset.tire_length_m,
+    )
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-import math
+import time
+from dataclasses import dataclass, field
 
 import numpy as np
 
-from .rdp import rdp_corner, initial_theta
-from .rectangle_model import RigidRectangle
-from .gauss_newton import FitResult, run_lm
+from .lshape import LShapeFit, LShapeResult
+from .optimizer import RefinedPose, refine_pose
+from .segmentation import find_corner_candidates
 
 
 @dataclass
-class FittingResult:
-    """Combined result from both pipeline stages."""
-    seed_corner_idx: int          # RDP corner index in pts array
-    seed_theta_rad: float         # θ₀ from RDP stage (rad)
-    fit: FitResult                # LM optimisation output
-    pts_used: np.ndarray          # (N, 2) points passed to the solver
+class PipelineResult:
+    """Complete output of the two-stage pipeline."""
+    # Coarse (Stage 1)
+    coarse: LShapeResult
+    # Refined (Stage 2)
+    refined: RefinedPose
+    # Diagnostics
+    elapsed_ms: float
+    n_points_used: int
+    corner_candidates: list[dict] = field(default_factory=list)
+
+    # -- Convenience accessors -----------------------------------------------
 
     @property
     def Y_m(self) -> float:
-        return self.fit.Y_m
-
-    @property
-    def psi_rad(self) -> float:
-        return self.fit.psi_rad
+        """Lateral offset of the NLG midpoint from guide axis [m]."""
+        return self.refined.yc
 
     @property
     def psi_deg(self) -> float:
-        return self.fit.psi_deg
+        """Heading / obliquity angle [deg]."""
+        import math
+        return math.degrees(self.refined.theta_rad)
 
     @property
-    def rmse_m(self) -> float:
-        return self.fit.rmse_m
+    def X_m(self) -> float:
+        """Longitudinal position of the NLG midpoint [m]."""
+        return self.refined.xc
 
-    @property
-    def converged(self) -> bool:
-        return self.fit.converged
+    def summary(self) -> dict:
+        return {
+            "X_m": round(self.X_m, 4),
+            "Y_m": round(self.Y_m, 4),
+            "psi_deg": round(self.psi_deg, 3),
+            "rmse_m": round(self.refined.rmse, 5),
+            "converged": self.refined.converged,
+            "lm_iters": self.refined.n_iter,
+            "cost_init": round(self.coarse.cost, 6),
+            "cost_final": round(self.refined.cost_final, 6),
+            "elapsed_ms": round(self.elapsed_ms, 2),
+            "n_points": self.n_points_used,
+        }
 
 
-def run_fitting_pipeline(
-    pts: np.ndarray,       # (N, 2) ordered hit points from ScanResult
-    W_real: float,         # known wheel/NLG width  (m) — from AircraftPreset
-    L_real: float,         # known wheel/NLG length (m) — from AircraftPreset
-    min_pts: int = 6,
-    max_iter: int = 60,
-) -> FittingResult | None:
-    """Run the full two-stage fitting pipeline.
+def run_pipeline(
+    hit_points: np.ndarray,
+    width_m: float,
+    length_m: float,
+    theta_step_deg: float = 0.5,
+    rdp_epsilon: float = 0.02,
+    seg_threshold: float = 0.04,
+    lm_method: str = "lm",
+    max_nfev: int = 200,
+) -> PipelineResult:
+    """Execute the two-stage L-shape fitting pipeline.
 
-    Returns None if there are fewer than min_pts hit points.
+    Parameters
+    ----------
+    hit_points     : (N, 2) ordered LiDAR hit points (angular order preserved)
+    width_m        : NLG width prior W [m]
+    length_m       : NLG length prior L [m]
+    theta_step_deg : angular resolution of coarse sweep [deg]
+    rdp_epsilon    : RDP simplification threshold [m]
+    seg_threshold  : Split-and-Merge perpendicular distance threshold [m]
+    lm_method      : scipy least_squares method ('lm' or 'trf')
+    max_nfev       : max function evaluations for LM
     """
-    if len(pts) < min_pts:
-        return None
+    t0 = time.perf_counter()
 
-    # ── Stage 1: RDP seed ────────────────────────────────────────────────────
-    corner_idx = rdp_corner(pts, eps=1e-3)
-    theta0     = initial_theta(pts, corner_idx)
+    pts = np.asarray(hit_points, dtype=float)
 
-    # Initial corner position = the RDP corner point
-    xc0 = float(pts[corner_idx, 0])
-    yc0 = float(pts[corner_idx, 1])
-    x0  = np.array([xc0, yc0, theta0])
+    # Stage 0: corner candidates (for diagnostics / multi-hypothesis)
+    corners = find_corner_candidates(
+        pts, epsilon=rdp_epsilon, distance_threshold=seg_threshold
+    )
 
-    # ── Stage 2: LM refinement with fixed W, L ───────────────────────────────
-    rect = RigidRectangle(W=W_real, L=L_real)
-    fit  = run_lm(pts, rect, x0, max_iter=max_iter)
+    # Stage 1: Search-based L-shape (coarse)
+    fitter = LShapeFit(
+        width_m=width_m,
+        length_m=length_m,
+        theta_step_deg=theta_step_deg,
+    )
+    coarse = fitter.fit(pts)
 
-    return FittingResult(
-        seed_corner_idx=corner_idx,
-        seed_theta_rad=theta0,
-        fit=fit,
-        pts_used=pts,
+    # Initial state: use best corner candidate if available, else centroid
+    if corners:
+        best = corners[0]
+        xc0 = float(best["corner"][0])
+        yc0 = float(best["corner"][1])
+        theta0 = float(best["theta0_rad"])
+    else:
+        xc0, yc0, theta0 = coarse.xc, coarse.yc, coarse.theta_rad
+
+    # Stage 2: LM refinement (precise)
+    refined = refine_pose(
+        xc0=xc0, yc0=yc0, theta0=theta0,
+        width_m=width_m, length_m=length_m,
+        points=pts,
+        method=lm_method,
+        max_nfev=max_nfev,
+    )
+
+    elapsed = (time.perf_counter() - t0) * 1000.0
+
+    return PipelineResult(
+        coarse=coarse,
+        refined=refined,
+        elapsed_ms=elapsed,
+        n_points_used=len(pts),
+        corner_candidates=corners,
     )
