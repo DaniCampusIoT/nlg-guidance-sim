@@ -13,6 +13,8 @@ Usage
         width_m=preset.tire_width_m,
         length_m=preset.tire_length_m,
     )
+    # Access the raw point cloud that was used:
+    #   result.hit_points_array  ->  (N, 2) np.ndarray
 """
 from __future__ import annotations
 
@@ -28,7 +30,21 @@ from .segmentation import find_corner_candidates
 
 @dataclass
 class PipelineResult:
-    """Complete output of the two-stage pipeline."""
+    """Complete output of the two-stage pipeline.
+
+    Attributes
+    ----------
+    coarse            : LShapeResult — coarse pose from Stage-1 angular sweep
+    refined           : RefinedPose  — LM-refined pose from Stage-2
+    elapsed_ms        : wall-clock time for the full pipeline [ms]
+    n_points_used     : number of LiDAR hit points processed
+    hit_points_array  : (N, 2) array of the actual hit points used —
+                        stored here so visualisation helpers can draw
+                        the point cloud without re-running the scan.
+                        Previously absent, causing fitting_plots.py to
+                        wrongly read coarse.n_points (int) as a point array.
+    corner_candidates : raw output of the segmentation / corner detector
+    """
     # Coarse (Stage 1)
     coarse: LShapeResult
     # Refined (Stage 2)
@@ -36,6 +52,8 @@ class PipelineResult:
     # Diagnostics
     elapsed_ms: float
     n_points_used: int
+    # Point cloud used by the pipeline — needed by fitting_plots.py
+    hit_points_array: np.ndarray = field(default_factory=lambda: np.empty((0, 2)))
     corner_candidates: list[dict] = field(default_factory=list)
 
     # -- Convenience accessors -----------------------------------------------
@@ -96,6 +114,7 @@ def run_pipeline(
     """
     t0 = time.perf_counter()
 
+    # Keep a clean copy for diagnostics / visualisation
     pts = np.asarray(hit_points, dtype=float)
 
     # Stage 0: corner candidates (for diagnostics / multi-hypothesis)
@@ -136,5 +155,6 @@ def run_pipeline(
         refined=refined,
         elapsed_ms=elapsed,
         n_points_used=len(pts),
+        hit_points_array=pts,          # <-- nube completa, usada por fitting_plots
         corner_candidates=corners,
     )

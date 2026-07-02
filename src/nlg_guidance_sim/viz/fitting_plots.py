@@ -1,6 +1,16 @@
 """Matplotlib helpers for the fitting pipeline visualisation.
 
 Adapted to PipelineResult (two-stage: coarse LShapeResult + refined RefinedPose).
+
+Fix (2026-07-02)
+----------------
+plot_fitting() previously contained the dead / broken line::
+
+    pts = fit_result.coarse.n_points
+
+coarse.n_points is an *int* (count of points), not a point array.
+The actual hit-point cloud is now stored in PipelineResult.hit_points_array
+and drawn as a coloured scatter in the scene overlay.
 """
 from __future__ import annotations
 
@@ -39,8 +49,10 @@ def _style_ax(ax) -> None:
     ax.grid(True, color=GRID, alpha=0.40, linewidth=0.7)
 
 
-def _rect_corners(xc: float, yc: float, theta: float, half_l: float, half_w: float) -> np.ndarray:
-    """Return (4,2) corner array for a rectangle centred at (xc,yc) rotated by theta."""
+def _rect_corners(
+    xc: float, yc: float, theta: float, half_l: float, half_w: float
+) -> np.ndarray:
+    """Return (4, 2) corner array for a rectangle centred at (xc, yc) rotated by theta."""
     c, s = math.cos(theta), math.sin(theta)
     offsets = np.array([
         [ half_l,  half_w],
@@ -56,18 +68,26 @@ def plot_fitting(
     scene: Scene,
     fit_result: PipelineResult,
 ) -> plt.Figure:
-    """Overlay fitted rigid rectangle + coarse L-shape seed on the scene 2D view."""
+    """Overlay fitted rigid rectangle + coarse L-shape seed on the 2D scene.
+
+    The LiDAR hit-point cloud is drawn from ``fit_result.hit_points_array``
+    (an (N, 2) ndarray stored by ``run_pipeline``).
+    Previously this function incorrectly read ``fit_result.coarse.n_points``
+    (an int) as though it were the point array — fixed here.
+    """
     fig, ax = plt.subplots(figsize=(11, 6.5), dpi=130)
     fig.patch.set_facecolor(BG)
     _style_ax(ax)
     ax.set_aspect("equal")
 
+    # ── Rails + guide axis ──────────────────────────────────────────────────
     x0 = scene.rail_start_x_m
     x1 = scene.rail_length_m
     ax.plot([x0, x1], [scene.left_rail_y_m]  * 2, "--", color="#8f8a81", lw=1.6, label="Raíles")
     ax.plot([x0, x1], [scene.right_rail_y_m] * 2, "--", color="#8f8a81", lw=1.6)
-    ax.plot([x0, x1], [scene.guide_axis_y_m] * 2, ":",  color=MUTED, lw=1.2)
+    ax.plot([x0, x1], [scene.guide_axis_y_m] * 2, ":",  color=MUTED,     lw=1.2)
 
+    # ── Platform ────────────────────────────────────────────────────────────
     from matplotlib.patches import Polygon as MPoly
     for outline, fc in [
         (scene.platform_body_outline(), "#ddd8cf"),
@@ -76,35 +96,48 @@ def plot_fitting(
         ax.add_patch(MPoly(outline, closed=True, facecolor=fc,
                            edgecolor="#625d56", linewidth=1.6))
 
-    # True wheel contours (ground-truth)
+    # ── Ground-truth wheel contours (dashed) ────────────────────────────────
     for contour in scene.nlg.wheel_contours_world():
         ax.add_patch(MPoly(contour, closed=True, facecolor="#dce7ef",
                            edgecolor=BLUE, linewidth=1.6, alpha=0.60,
                            linestyle="--", label="Contorno real"))
 
-    # LiDAR hit points used
-    pts = fit_result.coarse.n_points
-    # We need the actual point cloud — retrieve from scene via a helper flag
-    # (pts count is in coarse.n_points; for plotting we use corner_candidates if available)
-    # Plot coarse centre (Stage 1)
-    cx0, cy0 = fit_result.coarse.xc, fit_result.coarse.yc
-    ax.scatter(cx0, cy0, s=70, color=ORANGE, zorder=7, marker="s",
-               label=f"L-shape coarse (costo={fit_result.coarse.cost:.4f})")
+    # ── LiDAR hit-point cloud ───────────────────────────────────────────────
+    # hit_points_array is an (N, 2) ndarray stored in PipelineResult by
+    # run_pipeline().  coarse.n_points is an *int* (count only) — do NOT use
+    # it as a point array.
+    hit_pts = fit_result.hit_points_array
+    if hit_pts is not None and len(hit_pts) > 0:
+        ax.scatter(
+            hit_pts[:, 0], hit_pts[:, 1],
+            s=9, color=CYAN, alpha=0.75, zorder=5,
+            label=f"Nube LiDAR ({len(hit_pts)} pts)",
+        )
 
-    # Plot corner candidates from segmentation
-    for cand in fit_result.corner_candidates[:3]:  # top-3
+    # ── Stage-1: coarse L-shape centroid ───────────────────────────────────
+    cx0, cy0 = fit_result.coarse.xc, fit_result.coarse.yc
+    ax.scatter(
+        cx0, cy0, s=70, color=ORANGE, zorder=7, marker="s",
+        label=f"L-shape coarse  (costo={fit_result.coarse.cost:.4f})",
+    )
+
+    # ── Stage-0: top-3 corner candidates from segmentation ─────────────────
+    for cand in fit_result.corner_candidates[:3]:
         cpt = cand.get("corner", None)
         if cpt is not None:
-            ax.scatter(cpt[0], cpt[1], s=45, color=ORANGE, alpha=0.55, zorder=6, marker="^")
+            ax.scatter(cpt[0], cpt[1], s=45, color=ORANGE,
+                       alpha=0.55, zorder=6, marker="^")
 
-    # Refined rectangle (Stage 2 — LM)
+    # ── Stage-2: LM-refined rectangle ──────────────────────────────────────
     ref = fit_result.refined
     half_l = ref.length_m / 2.0
     half_w = ref.width_m  / 2.0
     corners = _rect_corners(ref.xc, ref.yc, ref.theta_rad, half_l, half_w)
     rect_closed = np.vstack([corners, corners[0]])
-    ax.plot(rect_closed[:, 0], rect_closed[:, 1],
-            color=RED, linewidth=2.4, zorder=6, label="Rectángulo LM")
+    ax.plot(
+        rect_closed[:, 0], rect_closed[:, 1],
+        color=RED, linewidth=2.4, zorder=6, label="Rectángulo LM",
+    )
     ax.scatter(ref.xc, ref.yc, s=55, color=RED, zorder=7, marker="+")
 
     ax.annotate(
@@ -127,11 +160,12 @@ def plot_fitting(
     ax.set_xlim(scene.rail_start_x_m - 0.1, scene.rail_length_m + 0.4)
     ax.set_ylim(-1.25, 1.25)
 
+    # Deduplicate legend entries
     handles, labels = ax.get_legend_handles_labels()
     seen, uh, ul = set(), [], []
-    for h, l in zip(handles, labels):
-        if l not in seen:
-            uh.append(h); ul.append(l); seen.add(l)
+    for h, lbl in zip(handles, labels):
+        if lbl not in seen:
+            uh.append(h); ul.append(lbl); seen.add(lbl)
     ax.legend(uh, ul, fontsize=8.5, loc="upper right", framealpha=0.85)
     return fig
 
@@ -146,8 +180,12 @@ def plot_ekf_history(
         fig, ax = plt.subplots(figsize=(8, 3), dpi=110)
         fig.patch.set_facecolor(BG)
         _style_ax(ax)
-        ax.text(0.5, 0.5, "Sin historial EKF aún — mueve el tren para acumular pasos",
-                ha="center", va="center", transform=ax.transAxes, color=MUTED, fontsize=10)
+        ax.text(
+            0.5, 0.5,
+            "Sin historial EKF aún — mueve el tren para acumular pasos",
+            ha="center", va="center",
+            transform=ax.transAxes, color=MUTED, fontsize=10,
+        )
         return fig
 
     steps    = list(range(len(history)))
